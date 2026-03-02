@@ -1,0 +1,1526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Locmind - Virtual Universe</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, touch-action=none">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        body { margin: 0; overflow: hidden; background: #111; font-family: 'Segoe UI', sans-serif; touch-action: none; }
+        canvas { display: block; outline: none; } 
+        
+        #loginScreen {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(135deg, #0f2027, #203a43, #2c5364); 
+            display: flex; justify-content: center; align-items: center; z-index: 20; color: white;
+        }
+        .login-box {
+            background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(10px);
+            padding: 40px; border-radius: 20px; text-align: center;
+            box-shadow: 0 15px 35px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); width: 350px;
+        }
+        .login-box h1 { margin: 0 0 10px 0; font-size: 28px; font-weight: 600; }
+        .login-box p { color: #aaa; font-size: 14px; margin-bottom: 20px; }
+        input[type="text"], input[type="password"] {
+            width: 90%; padding: 12px; font-size: 16px; border-radius: 8px;
+            border: 1px solid #444; background: rgba(255,255,255,0.1); color: white;
+            text-align: center; margin-bottom: 20px; outline: none; transition: 0.3s;
+        }
+        input:focus { border-color: #00a8ff; background: rgba(255,255,255,0.2); }
+        
+        .avatar-picker { display: flex; justify-content: center; gap: 15px; margin-bottom: 25px; }
+        .avatar-option { width: 50px; height: 50px; border-radius: 50%; border: 3px solid transparent; cursor: pointer; transition: 0.2s; background: rgba(255,255,255,0.1);}
+        .avatar-option.selected { border-color: #00a8ff; transform: scale(1.15); box-shadow: 0 0 15px #00a8ff; }
+
+        .btn-primary {
+            width: 100%; padding: 14px; font-size: 16px; font-weight: bold; cursor: pointer;
+            background: linear-gradient(90deg, #00a8ff, #0097e6); color: white;
+            border: none; border-radius: 8px; transition: 0.3s; box-shadow: 0 5px 15px rgba(0, 168, 255, 0.4);
+        }
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0, 168, 255, 0.6); }
+        
+        .tos-container { display: flex; align-items: center; justify-content: center; font-size: 13px; margin-bottom: 20px; color: #ccc; }
+        .tos-container input { margin-right: 8px; cursor: pointer; }
+        .tos-container a { color: #00a8ff; text-decoration: none; font-weight: bold; }
+
+        .modal {
+            display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: #222; padding: 25px; border-radius: 12px; text-align: center; z-index: 15;
+            box-shadow: 0 0 25px rgba(0,0,0,0.9); border: 1px solid #444; color: white;
+        }
+        .modal button { width: 100%; padding: 10px; margin-top: 5px; border-radius: 5px; border:none; cursor: pointer; font-weight:bold;}
+        .modal .btn-green { background: #28a745; color: white; }
+        .modal .btn-red { background: #dc3545; color: white; }
+        
+        #afkModal { border: 2px solid #ff9f43; }
+        #afkModal h2 { color: #ff9f43; margin-top: 0;}
+        #kickedScreen { display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); flex-direction: column; justify-content: center; align-items: center; z-index: 30; color: white; text-align: center; }
+
+        #ui-layer { position: absolute; top: 10px; left: 10px; pointer-events: none; display: flex; flex-direction: column; gap: 8px; z-index: 5;}
+        .info-text { color: white; font-size: 14px; text-shadow: 1px 1px 2px black; }
+        
+        #roomUsers { color: #ccc; font-size: 13px; background: rgba(0,0,0,0.6); padding: 10px; border-radius: 8px; display: none; border-left: 3px solid #00a8ff; pointer-events: auto; max-height: 200px; overflow-y:auto; }
+
+        #micBtn { padding: 8px 12px; background: #dc3545; color: white; border: none; border-radius: 5px; cursor: pointer; pointer-events: auto; font-weight: bold; display: flex; align-items: center; justify-content: center; gap: 5px; width: 100%; }
+        
+        .action-btn { padding: 8px 12px; background: #fbc531; color: black; border: none; border-radius: 5px; cursor: pointer; pointer-events: auto; font-weight: bold; width: 100%; margin-top: 5px;}
+
+        .mic-controls { background: rgba(0,0,0,0.6); padding: 10px; border-radius: 8px; pointer-events: auto; border-left: 3px solid #fbc531; width: 180px; }
+        .vol-slider { -webkit-appearance: none; width: 100%; height: 4px; background: #555; border-radius: 2px; cursor: pointer; margin-top: 5px; }
+        .vol-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; background: #00a8ff; border-radius: 50%; }
+
+        #interaction-hint { display: none; position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); color: white; padding: 10px 20px; border-radius: 20px; font-size: 16px; pointer-events: none; border: 1px solid #00a8ff; }
+
+        #whiteboardWindow {
+            display: none; position: absolute; top: 100px; left: 300px; width: 600px; height: 400px;
+            background: #222; border: 2px solid #fbc531; border-radius: 8px; z-index: 10;
+            flex-direction: column; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+            resize: both; 
+        }
+        .wb-header {
+            background: #fbc531; color: black; padding: 8px 10px; font-weight: bold;
+            cursor: move; user-select: none; display: flex; justify-content: space-between; align-items: center;
+        }
+        .wb-tools { background: #333; padding: 5px; display: flex; gap: 8px; justify-content:center;}
+        .wb-btn { padding: 4px 10px; border: none; border-radius: 3px; cursor: pointer; font-weight:bold;}
+        #wbCanvas { cursor: crosshair; display: block; width: 100%; height: 100%; background: white; }
+
+        #notesWindow {
+            display: none; position: absolute; top: 150px; left: 350px; width: 400px; height: 350px;
+            background: #222; border: 2px solid #28a745; border-radius: 8px; z-index: 11;
+            flex-direction: column; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+            resize: both;
+        }
+        .notes-header {
+            background: #28a745; color: white; padding: 8px 10px; font-weight: bold;
+            cursor: move; user-select: none; display: flex; justify-content: space-between; align-items: center;
+        }
+
+        #musicWindow {
+            display: none; position: absolute; bottom: 100px; right: 20px; width: 330px; height: 400px;
+            background: #222; border: 2px solid #e056fd; border-radius: 8px; z-index: 13;
+            flex-direction: column; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+            resize: none;
+        }
+        .music-header {
+            background: linear-gradient(90deg, #be2edd, #e056fd); color: white; padding: 8px 10px; font-weight: bold;
+            cursor: move; user-select: none; display: flex; justify-content: space-between; align-items: center;
+        }
+        .music-body { flex:1; padding:10px; display:flex; flex-direction:column; gap:10px; background:#111; }
+        .music-input-group { display:flex; gap:5px; }
+        .music-input-group input { flex:1; background:#333; border:1px solid #555; color:white; padding:5px; border-radius:4px; }
+        .music-input-group button { border:none; padding:5px 10px; color:white; border-radius:4px; cursor:pointer; font-weight:bold; }
+        .btn-add { background:#e056fd; }
+        .btn-next { background:#fbc531; color:black !important; }
+        .music-list { flex:1; background:black; border:1px solid #444; overflow-y:auto; padding:5px; font-family: monospace; font-size:12px; color:#0f0; }
+        .music-item { padding:2px; display:flex; justify-content:space-between; align-items:center; }
+        .music-item-text { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1; }
+        .music-item-delete { color:#ff4757; font-weight:bold; cursor:pointer; margin-left:8px; padding:0 5px; }
+        .music-item-delete:hover { color:#ff6b81; }
+        .music-controls { display:flex; align-items:center; gap:10px; justify-content:space-between; margin-top:5px;}
+        #hidden-yt-player { position:absolute; top:-9999px; left:-9999px; width:1px; height:1px; }
+
+        .screen-share-window {
+            position: absolute; width: 500px; height: 350px;
+            background: #222; border: 2px solid #00a8ff; border-radius: 8px; z-index: 12;
+            display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+            resize: both;
+        }
+        .ss-header {
+            background: #00a8ff; color: white; padding: 8px 10px; font-weight: bold;
+            cursor: move; user-select: none; display: flex; justify-content: space-between; align-items: center;
+        }
+
+        #emojiPicker {
+            display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(20, 20, 20, 0.95); border: 2px solid #fbc531; border-radius: 12px; padding: 15px;
+            width: 300px; max-height: 250px; overflow-y: auto; z-index: 50; flex-wrap: wrap; gap: 10px; justify-content: center;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.9);
+        }
+        .emoji-item { width: 45px; height: 45px; cursor: pointer; transition: 0.2s; border-radius: 8px; object-fit: contain; }
+        .emoji-item:hover { transform: scale(1.2); background: rgba(255,255,255,0.1); }
+
+        #chatBox {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.9); padding: 12px 25px; border-radius: 30px;
+            border: 2px solid #00a8ff; display: none; z-index: 20; box-shadow: 0 5px 20px rgba(0,0,0,0.8);
+        }
+        #chatInput {
+            background: transparent; border: none; color: white; font-size: 16px; width: 350px; outline: none; text-align: left; margin: 0; padding: 0;
+        }
+
+        #video-layer { display: none; }
+    </style>
+    
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <script src="https://www.youtube.com/iframe_api"></script>
+</head>
+<body>
+
+    <div id="audioContainer" style="display:none;"></div>
+    <div id="video-layer"></div>
+    <div id="hidden-yt-player"></div>
+
+    <div id="loginScreen">
+        <div class="login-box">
+            <h1>Space Room</h1>
+            <p>Travel and Chat</p>
+            
+            <input type="text" id="nickInput" placeholder="Nick Name" maxlength="12">
+            
+            <div class="avatar-picker">
+                <img src="usr1.png" class="avatar-option selected" data-avatar="usr1.png" onclick="selectAvatar(this)" onerror="this.src='https://api.dicebear.com/7.x/bottts/svg?seed=1'">
+                <img src="usr2.png" class="avatar-option" data-avatar="usr2.png" onclick="selectAvatar(this)" onerror="this.src='https://api.dicebear.com/7.x/bottts/svg?seed=2'">
+                <img src="usr3.png" class="avatar-option" data-avatar="usr3.png" onclick="selectAvatar(this)" onerror="this.src='https://api.dicebear.com/7.x/bottts/svg?seed=3'">
+                <img src="usr4.png" class="avatar-option" data-avatar="usr4.png" onclick="selectAvatar(this)" onerror="this.src='https://api.dicebear.com/7.x/bottts/svg?seed=4'">
+            </div>
+
+            <div class="tos-container">
+                <input type="checkbox" id="tosCheck">
+                <label for="tosCheck">I have read and understood the <a href="#" onclick="alert('KVKK Metni...')">contract.</a></label>
+            </div>
+            
+            <button onclick="startGame()" class="btn-primary">Start</button>
+        </div>
+    </div>
+
+    <div id="whiteboardWindow">
+        <div class="wb-header" onmousedown="startDrag(event, 'whiteboardWindow')">
+            <span>🎨 Room Whiteboard</span>
+            <span style="cursor:pointer; font-size:16px;" onclick="toggleWhiteboard()">✖</span>
+        </div>
+        <div class="wb-tools">
+            <button class="wb-btn" style="background:#222; color:white;" onclick="wbColor='black'; wbWidth=3;">Siyah Kalem</button>
+            <button class="wb-btn" style="background:red; color:white;" onclick="wbColor='red'; wbWidth=3;">Kırmızı</button>
+            <button class="wb-btn" style="background:#00a8ff; color:white;" onclick="wbColor='#00a8ff'; wbWidth=3;">Mavi</button>
+            <button class="wb-btn" style="background:white; color:black; border:1px solid #ccc;" onclick="wbColor='white'; wbWidth=20;">Silgi</button>
+            <button class="wb-btn" style="background:#dc3545; color:white; margin-left:10px;" onclick="clearWhiteboard()">Hepsini Sil</button>
+        </div>
+        <div style="flex:1; position:relative;">
+            <canvas id="wbCanvas" style="position:absolute; top:0; left:0;"></canvas>
+        </div>
+    </div>
+
+    <div id="notesWindow">
+        <div class="notes-header" onmousedown="startDrag(event, 'notesWindow')">
+            <span>📝 Shared Notes</span>
+            <span style="cursor:pointer; font-size:16px;" onclick="toggleNotes()">✖</span>
+        </div>
+        <textarea id="sharedNotes" style="flex:1; width:100%; box-sizing:border-box; background:#333; color:white; border:none; padding:15px; resize:none; font-family:'Segoe UI', sans-serif; font-size: 15px; outline:none;" placeholder="Type here... Everyone in the room can see this."></textarea>
+        <button onclick="exportNotes()" style="background:#28a745; color:white; border:none; padding:12px; cursor:pointer; font-weight:bold; font-size: 14px;">⬇️ Dışarı Aktar (TXT)</button>
+    </div>
+
+    <div id="musicWindow">
+        <div class="music-header" onmousedown="startDrag(event, 'musicWindow')">
+            <span>🎵 Room Music</span>
+            <span style="cursor:pointer; font-size:16px;" onclick="toggleMusic()">✖</span>
+        </div>
+        <div class="music-body">
+            <div class="music-input-group">
+                <input type="text" id="musicInput" placeholder="YouTube Link or Search Text">
+                <button class="btn-add" onclick="addMusic()">Add</button>
+                <button class="btn-next" onclick="nextMusic()">Next</button>
+            </div>
+            <div style="font-size:11px; color:#aaa; margin-top:-5px;">* Playing: <span id="nowPlayingText" style="color:#e056fd">Nothing</span></div>
+            <div class="music-list" id="musicList"></div>
+            <div class="music-controls">
+                <span style="color:white; font-size:12px;">Vol:</span>
+                <input type="range" class="vol-slider" min="0" max="100" value="50" oninput="setMusicVolume(this.value)">
+            </div>
+        </div>
+    </div>
+
+    <div id="afkModal" class="modal">
+        <h2>Are you there? 💤</h2>
+        <p>You haven't moved for a long time.</p>
+        <button onclick="imHere()" class="btn-green">I'm here</button>
+    </div>
+
+    <div id="kickedScreen">
+        <h1>Connection lost</h1>
+        <p>You have been disconnected from the server due to inactivity.</p>
+        <button onclick="window.location.reload()" style="padding:15px; background:#00a8ff; color:white; border:none; border-radius:5px; cursor:pointer; font-size:18px; margin-top:20px;">Yeniden Bağlan</button>
+    </div>
+
+    <div id="createRoomUI" class="modal">
+        <h3>Create Room</h3>
+        <input type="text" id="roomNameInput" placeholder="Room Name" maxlength="20">
+        <input type="password" id="roomPassInput" placeholder="password (Optional)" maxlength="20">
+        <button onclick="confirmRoom()" class="btn-primary">Create</button>
+        <button onclick="closeUI('createRoomUI')" class="btn-red">Cancel</button>
+    </div>
+
+    <div id="enterPassUI" class="modal">
+        <h3>🔒 Room Locked</h3>
+        <p>Enter the password to log in</p>
+        <input type="password" id="enterPassInput" placeholder="password" maxlength="20">
+        <button onclick="submitPassword()" class="btn-primary">Login</button>
+        <button onclick="closeUI('enterPassUI')" class="btn-red">Cancel</button>
+    </div>
+
+    <div id="ui-layer">
+        <div class="info-text" id="status" style="background:rgba(0,0,0,0.6); padding:5px 10px; border-radius:5px;">Status: Waiting...</div>
+        <div class="info-text" id="sesDurumu" style="background:rgba(0,0,0,0.6); padding:5px 10px; border-radius:5px;">Sound: Off</div>
+        
+        <div class="mic-controls">
+            <button id="micBtn" onclick="toggleMic()"><i class="fas fa-microphone"></i> Mic: ON (F)</button>
+            <button id="camToggleBtn" class="action-btn" style="background:#6c757d; color:white;" onclick="toggleCamera()">📷 Camera OFF (C)</button>
+            
+            <button id="wbToggleBtn" class="action-btn" style="display:none;" onclick="toggleWhiteboard()">🎨 Whiteboard (G)</button>
+            <button id="notesToggleBtn" class="action-btn" style="display:none; background:#28a745; color:white;" onclick="toggleNotes()">📝 Notepad (H)</button>
+            <button id="musicToggleBtn" class="action-btn" style="display:none; background:#e056fd; color:white;" onclick="toggleMusic()">🎵 Music Box (M)</button>
+            <button id="ssToggleBtn" class="action-btn" style="display:none; background:#00a8ff; color:white;" onclick="toggleScreenShare()">📺 Share Screen</button>
+            
+            <div style="font-size:11px; color:#ccc; margin-top:10px; text-align:center;">Press <b>[Q]</b> for Emojis<br>Press <b>[Enter]</b> to Chat<br><b>Touch/Click</b> to Move</div>
+        </div>
+
+        <div id="roomUsers"></div>
+    </div>
+
+    <div id="emojiPicker"></div>
+    
+    <div id="chatBox">
+        <input type="text" id="chatInput" placeholder="Mesaj yazın (Göndermek için Enter)..." maxlength="60">
+    </div>
+
+    <div id="interaction-hint">Press <b>[E]</b> to build a room</div>
+    
+    <canvas id="gameCanvas" tabindex="1"></canvas>
+
+<script>
+    const socket = io();
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    let mySelectedAvatar = 'usr1.png';
+    const loadedAvatars = {}; 
+    const loadedEmojis = {}; 
+    const camVideoCache = {};
+
+    function escapeHtml(unsafe) {
+        return (unsafe || "").toString()
+             .replace(/&/g, "&amp;")
+             .replace(/</g, "&lt;")
+             .replace(/>/g, "&gt;")
+             .replace(/"/g, "&quot;")
+             .replace(/'/g, "&#039;");
+    }
+
+    function selectAvatar(element) {
+        document.querySelectorAll('.avatar-option').forEach(el => el.classList.remove('selected'));
+        element.classList.add('selected');
+        mySelectedAvatar = element.getAttribute('data-avatar');
+    }
+
+    ['usr1.png', 'usr2.png', 'usr3.png', 'usr4.png'].forEach(src => {
+        let img = new Image(); img.src = src;
+        img.onerror = function() { this.src = 'https://api.dicebear.com/7.x/bottts/svg?seed=' + src; };
+        loadedAvatars[src] = img;
+    });
+
+    const joinSound = new Audio("https://actions.google.com/sounds/v1/cartoon/pop.ogg");
+    const leaveSound = new Audio("https://actions.google.com/sounds/v1/cartoon/wood_plank_flicks.ogg");
+
+    function playSoundEffect(type) {
+        if (type === 'join') { joinSound.volume=0.3; joinSound.currentTime=0; joinSound.play().catch(e=>{}); }
+        else { leaveSound.volume=0.3; leaveSound.currentTime=0; leaveSound.play().catch(e=>{}); }
+    }
+
+    let myId = null; let players = {}; let rooms = {}; let slots = []; let unlockedRooms = [];
+    let gameActive = false; let keys = {};
+    
+    const SPEED = 5; const PLAYER_SIZE = 40; const DOOR_SIZE = 70;
+    const MAX_HEAR_DISTANCE = 400;
+
+    let cameraZoom = 1; const MIN_ZOOM = 0.4; const MAX_ZOOM = 2.0;
+    let currentSlotId = null; let pendingUnlockSlotId = null;
+    window.currentJoinedRoomId = null; 
+
+    let peer, rawMicStream, processedStream, calls = {};
+    
+    let isMicMuted = false;
+    let audioContext, myAnalyser; 
+    let userAnalysers = {}; const TALK_THRESHOLD = 15; 
+    
+    let peerAudioElements = {}; let peerGainNodes = {}; let userVolumes = {}; 
+    window.lastRoomUsersHash = ""; 
+
+    const wbCanvas = document.getElementById('wbCanvas');
+    const ctxWB = wbCanvas.getContext('2d');
+    let isDrawingWB = false; let wbLastX = 0; let wbLastY = 0;
+    let wbColor = 'black'; let wbWidth = 3;
+
+    let screenStream = null; let screenCalls = {}; let activeScreenShares = {}; 
+    let localCamStream = null; let camCalls = {};
+
+    let ytPlayer = null;
+    let musicPlaylist = [];
+    let currentMusic = null;
+    let ball = null;
+
+    let lastActivityTime = Date.now(); let isAfkWarningVisible = false; let afkKickTimeout;
+    const AFK_LIMIT = 30 * 60 * 1000; const KICK_DELAY = 30 * 1000; 
+
+    let lastMoveEmitTime = 0; 
+    let needsRedraw = true; 
+    let clickTargetX = null, clickTargetY = null; 
+
+    let dragEl = null, dragOffsetX = 0, dragOffsetY = 0;
+    function startDrag(e, id) {
+        dragEl = document.getElementById(id); if(!dragEl) return;
+        const rect = dragEl.getBoundingClientRect();
+        dragOffsetX = e.clientX - rect.left; dragOffsetY = e.clientY - rect.top;
+        document.addEventListener('mousemove', dragMove); document.addEventListener('mouseup', dragEnd);
+    }
+    function dragMove(e) {
+        if(!dragEl) return;
+        dragEl.style.left = (e.clientX - dragOffsetX) + 'px'; dragEl.style.top = (e.clientY - dragOffsetY) + 'px';
+    }
+    function dragEnd() { dragEl = null; document.removeEventListener('mousemove', dragMove); document.removeEventListener('mouseup', dragEnd); }
+
+    window.addEventListener('wheel', (e) => {
+        if (!gameActive) return; 
+        cameraZoom += e.deltaY * -0.001; 
+        cameraZoom = Math.min(Math.max(cameraZoom, MIN_ZOOM), MAX_ZOOM);
+        needsRedraw = true;
+    });
+
+    canvas.addEventListener('pointerdown', (e) => {
+        if (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "TEXTAREA") return;
+        if (!gameActive || !players[myId]) return;
+        
+        const me = players[myId];
+        const clientX = e.clientX || (e.touches && e.touches[0].clientX);
+        const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+        
+        const worldX = ((clientX - window.innerWidth/2) / cameraZoom) + me.x + PLAYER_SIZE/2;
+        const worldY = ((clientY - window.innerHeight/2) / cameraZoom) + me.y + PLAYER_SIZE/2;
+        
+        clickTargetX = worldX - PLAYER_SIZE/2;
+        clickTargetY = worldY - PLAYER_SIZE/2;
+        needsRedraw = true;
+        resetAFK();
+    });
+
+    function onYouTubeIframeAPIReady() {
+        ytPlayer = new YT.Player('hidden-yt-player', {
+            height: '1',
+            width: '1',
+            playerVars: { 'autoplay': 0, 'controls': 0, 'disablekb': 1 },
+            events: {
+                'onStateChange': onPlayerStateChange
+            }
+        });
+    }
+
+    function onPlayerStateChange(event) {
+        if (event.data === YT.PlayerState.ENDED) {
+            if (window.currentJoinedRoomId) {
+                socket.emit('music-ended', window.currentJoinedRoomId);
+            }
+        }
+    }
+
+    function toggleMusic() {
+        const win = document.getElementById('musicWindow');
+        if (win.style.display === 'none') {
+            if (!window.currentJoinedRoomId) return alert("You must be inside a room.");
+            win.style.display = 'flex';
+        } else { win.style.display = 'none'; }
+    }
+
+    function setMusicVolume(val) {
+        if(ytPlayer && ytPlayer.setVolume) ytPlayer.setVolume(val);
+    }
+
+    async function addMusic() {
+        const input = document.getElementById('musicInput');
+        const val = input.value.trim();
+        if(!val) return;
+        if(!window.currentJoinedRoomId) return;
+
+        let videoId = null;
+        let title = "Unknown Song";
+
+        const youtubeRegex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
+        const match = val.match(youtubeRegex);
+
+        if (match && match[1]) {
+            videoId = match[1];
+            title = "YouTube Video (" + videoId + ")";
+            socket.emit('music-add', { roomId: window.currentJoinedRoomId, videoId: videoId, title: title });
+            input.value = "";
+        } else {
+            input.value = "Searching...";
+            try {
+                const searchRes = await fetch(`https://invidious.projectsegfau.lt/api/v1/search?q=${encodeURIComponent(val)}`);
+                if(!searchRes.ok) throw new Error('Search failed');
+                const data = await searchRes.json();
+                if(data && data.length > 0) {
+                    videoId = data[0].videoId;
+                    title = data[0].title;
+                    socket.emit('music-add', { roomId: window.currentJoinedRoomId, videoId: videoId, title: title });
+                    input.value = "";
+                } else {
+                    alert("No results found.");
+                    input.value = val;
+                }
+            } catch(e) {
+                console.error(e);
+                alert("Search failed. Please paste a YouTube link directly.");
+                input.value = val;
+            }
+        }
+    }
+
+    function nextMusic() {
+        if (window.currentJoinedRoomId) {
+            socket.emit('music-next', window.currentJoinedRoomId);
+        }
+    }
+
+    window.removeMusic = function(index) {
+        if (window.currentJoinedRoomId) {
+            socket.emit('music-remove', { roomId: window.currentJoinedRoomId, index: index });
+        }
+    };
+
+    socket.on('music-update', (data) => {
+        updateMusicUI(data);
+        syncMusicPlayer(data);
+    });
+
+    function updateMusicUI(data) {
+        const list = document.getElementById('musicList');
+        const nowTxt = document.getElementById('nowPlayingText');
+        list.innerHTML = "";
+        
+        if (data.current) {
+            nowTxt.innerText = data.current.title;
+        } else {
+            nowTxt.innerText = "Nothing";
+        }
+
+        data.playlist.forEach((item, index) => {
+            const div = document.createElement('div');
+            div.className = 'music-item';
+            div.innerHTML = `
+                <span class="music-item-text" title="${escapeHtml(item.title)}">${index+1}. ${escapeHtml(item.title)} (by ${escapeHtml(item.addedBy)})</span>
+                <span class="music-item-delete" title="Remove" onclick="removeMusic(${index})">X</span>
+            `;
+            list.appendChild(div);
+        });
+    }
+
+    function syncMusicPlayer(data) {
+        if (!ytPlayer || !ytPlayer.loadVideoById) return;
+
+        if (data.current) {
+            if (currentMusic && currentMusic.videoId === data.current.videoId) {
+                if(ytPlayer.getPlayerState() !== 1) ytPlayer.playVideo();
+            } else {
+                currentMusic = data.current;
+                const seekTo = (Date.now() - data.startTime) / 1000;
+                ytPlayer.loadVideoById(data.current.videoId, seekTo);
+            }
+        } else {
+            currentMusic = null;
+            ytPlayer.stopVideo();
+        }
+    }
+
+    async function startGame() {
+        const nick = document.getElementById('nickInput').value;
+        const isTosChecked = document.getElementById('tosCheck').checked;
+
+        if(!nick) return alert("Please enter your username.");
+        if(!isTosChecked) return alert("Please accept the agreement!");
+        
+        try { 
+            rawMicStream = await navigator.mediaDevices.getUserMedia({ 
+                audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, googEchoCancellation: true, googAutoGainControl: true, googNoiseSuppression: true, sampleRate: 48000, channelCount: 1 } 
+            }); 
+            
+            processedStream = rawMicStream; 
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioContext.state === 'suspended') { await audioContext.resume(); }
+
+            const localSource = audioContext.createMediaStreamSource(rawMicStream);
+            myAnalyser = audioContext.createAnalyser(); 
+            myAnalyser.fftSize = 64;
+            localSource.connect(myAnalyser); 
+        } catch(e) { 
+            console.log("Ses hatası:", e); alert("Microphone error! Make sure you have an HTTPS connection."); return;
+        }
+
+        document.getElementById('loginScreen').style.display = 'none';
+        socket.emit('joinGame', { nickname: nick, avatar: mySelectedAvatar });
+        
+        gameActive = true; resetAFK(); 
+        document.getElementById('status').innerText = "Online: " + escapeHtml(nick);
+        canvas.focus(); 
+        setupPeer(); loop();
+    }
+
+    window.changeVolume = function(peerId, value) { userVolumes[peerId] = parseFloat(value); };
+
+    window.toggleMic = function() {
+        isMicMuted = !isMicMuted;
+        const btn = document.getElementById('micBtn');
+        if (isMicMuted) { btn.innerHTML = '<i class="fas fa-microphone-slash"></i> Mic: OFF (F)'; btn.style.background = "#6c757d"; } 
+        else { btn.innerHTML = '<i class="fas fa-microphone"></i> Mic: ON (F)'; btn.style.background = "#dc3545"; }
+        if (rawMicStream) { rawMicStream.getAudioTracks().forEach(track => { track.enabled = !isMicMuted; }); }
+        needsRedraw = true; resetAFK();
+    };
+
+    window.toggleCamera = async function() {
+        const btn = document.getElementById('camToggleBtn');
+        
+        if (localCamStream) {
+            localCamStream.getTracks().forEach(t => t.stop());
+            localCamStream = null;
+            players[myId].hasCamera = false;
+            
+            let v = camVideoCache[myId];
+            if(v) { v.remove(); delete camVideoCache[myId]; }
+            
+            for (let pid in camCalls) { camCalls[pid].close(); }
+            camCalls = {};
+            
+            btn.innerHTML = "📷 Camera OFF (C)"; btn.style.background = "#6c757d";
+            socket.emit('camera-stopped');
+            needsRedraw = true; return;
+        }
+
+        try {
+            localCamStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+            players[myId].hasCamera = true;
+            
+            let video = document.createElement('video');
+            video.id = 'cam-vid-' + myId;
+            video.autoplay = true; video.muted = true; video.playsInline = true;
+            document.getElementById('video-layer').appendChild(video);
+            
+            video.srcObject = localCamStream;
+            video.onloadedmetadata = () => { video.play(); }; 
+            camVideoCache[myId] = video; 
+            
+            btn.innerHTML = "📷 Camera ON (C)"; btn.style.background = "#28a745";
+            
+            for (let pid in players) {
+                if (pid === myId) continue;
+                const p = players[pid];
+                if (p.peerId && checkIsConnected(players[myId], p)) {
+                    const call = peer.call(p.peerId, localCamStream, { metadata: { type: 'camera' } });
+                    camCalls[p.peerId] = call;
+                }
+            }
+            needsRedraw = true; resetAFK();
+        } catch (e) { alert("Camera not found or permission denied."); }
+    };
+
+    function attachAnalyser(stream, id) {
+        if(!audioContext) return;
+        const source = audioContext.createMediaStreamSource(stream);
+        const analyser = audioContext.createAnalyser(); analyser.fftSize = 64; 
+        source.connect(analyser); userAnalysers[id] = analyser;
+    }
+
+    function isUserSpeaking(id) {
+        const analyser = userAnalysers[id]; if (!analyser) return false;
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        analyser.getByteFrequencyData(dataArray);
+        let peak = 0; for (let i = 0; i < dataArray.length; i++) { if(dataArray[i] > peak) peak = dataArray[i]; }
+        return peak > TALK_THRESHOLD;
+    }
+
+    function toggleWhiteboard() {
+        const win = document.getElementById('whiteboardWindow');
+        if (win.style.display === 'none') {
+            if (!window.currentJoinedRoomId) return alert("You must be inside a room to use the whiteboard.");
+            win.style.display = 'flex'; resizeWhiteboard();
+        } else { win.style.display = 'none'; }
+    }
+
+    function resizeWhiteboard() {
+        if (wbCanvas.offsetWidth > 0) {
+            let temp = null;
+            if(wbCanvas.width > 0 && wbCanvas.height > 0) temp = ctxWB.getImageData(0,0,wbCanvas.width, wbCanvas.height);
+            wbCanvas.width = wbCanvas.offsetWidth; wbCanvas.height = wbCanvas.offsetHeight;
+            if(temp) ctxWB.putImageData(temp,0,0);
+        }
+    }
+    new ResizeObserver(resizeWhiteboard).observe(document.getElementById('whiteboardWindow'));
+
+    function getMousePosWB(e) {
+        const rect = wbCanvas.getBoundingClientRect();
+        return [ (e.clientX - rect.left) * (wbCanvas.width / rect.width), (e.clientY - rect.top) * (wbCanvas.height / rect.height) ];
+    }
+
+    wbCanvas.addEventListener('mousedown', e => { isDrawingWB = true; [wbLastX, wbLastY] = getMousePosWB(e); });
+    wbCanvas.addEventListener('mousemove', e => {
+        if (!isDrawingWB || !window.currentJoinedRoomId) return;
+        const [x, y] = getMousePosWB(e);
+        drawOnWhiteboard(wbLastX, wbLastY, x, y, wbColor, wbWidth);
+        socket.emit('wb-draw', { roomId: window.currentJoinedRoomId, x0: wbLastX, y0: wbLastY, x1: x, y1: y, color: wbColor, width: wbWidth });
+        [wbLastX, wbLastY] = [x, y];
+    });
+    window.addEventListener('mouseup', () => isDrawingWB = false);
+
+    function drawOnWhiteboard(x0, y0, x1, y1, color, width) {
+        ctxWB.beginPath(); ctxWB.moveTo(x0, y0); ctxWB.lineTo(x1, y1);
+        ctxWB.strokeStyle = color; ctxWB.lineWidth = width; ctxWB.lineCap = "round"; ctxWB.stroke(); ctxWB.closePath();
+    }
+
+    function clearWhiteboard() {
+        ctxWB.clearRect(0, 0, wbCanvas.width, wbCanvas.height);
+        if (window.currentJoinedRoomId) socket.emit('wb-clear', window.currentJoinedRoomId);
+    }
+
+    socket.on('wb-draw', data => drawOnWhiteboard(data.x0, data.y0, data.x1, data.y1, data.color, data.width));
+    socket.on('wb-clear', () => ctxWB.clearRect(0, 0, wbCanvas.width, wbCanvas.height));
+
+    function toggleNotes() {
+        const win = document.getElementById('notesWindow');
+        if (win.style.display === 'none') {
+            if (!window.currentJoinedRoomId) return alert("Odaya girmeden not defterini açamazsınız.");
+            win.style.display = 'flex';
+        } else { win.style.display = 'none'; }
+    }
+
+    document.getElementById('sharedNotes').addEventListener('input', function(e) {
+        if (window.currentJoinedRoomId) { socket.emit('note-update', { roomId: window.currentJoinedRoomId, text: this.value }); }
+    });
+
+    socket.on('note-update', text => { document.getElementById('sharedNotes').value = text; });
+
+    function exportNotes() {
+        const text = document.getElementById('sharedNotes').value;
+        const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'Oda_Notlari.txt';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    }
+
+    function getNicknameByPeerId(peerId) {
+        for (let pid in players) { if (players[pid].peerId === peerId) return escapeHtml(players[pid].nickname); } return "User";
+    }
+
+    function createScreenShareWindow(id, stream, isLocal) {
+        if (document.getElementById('ss-win-' + id)) return; 
+        const win = document.createElement('div'); win.id = 'ss-win-' + id; win.className = 'screen-share-window';
+        const offset = Object.keys(activeScreenShares).length * 30;
+        win.style.top = (150 + offset) + 'px'; win.style.left = (150 + offset) + 'px';
+
+        let title = isLocal ? "📺 My Screen" : `📺 Screen: ${getNicknameByPeerId(id)}`;
+        win.innerHTML = `
+            <div class="ss-header" onmousedown="startDrag(event, 'ss-win-${id}')">
+                <span>${title}</span>
+                <span style="cursor:pointer; font-size:16px;" onclick="removeScreenShareWindow('${id}', ${isLocal})">✖</span>
+            </div>
+            <div style="flex:1; background:black; position:relative;">
+                <video id="ss-vid-${id}" autoplay playsinline style="width: 100%; height: 100%; object-fit: contain;"></video>
+            </div>
+        `;
+        document.body.appendChild(win);
+        const video = document.getElementById('ss-vid-' + id); video.srcObject = stream;
+        activeScreenShares[id] = win;
+    }
+
+    window.removeScreenShareWindow = function(id, isLocal) {
+        if (isLocal) { stopScreenShare(); } else {
+            const win = document.getElementById('ss-win-' + id);
+            if (win) win.remove(); delete activeScreenShares[id];
+        }
+    };
+
+    async function toggleScreenShare() {
+        if (!window.currentJoinedRoomId) return alert("You must be in a room to share screen.");
+        if (screenStream) { stopScreenShare(); } else {
+            try {
+                screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+                for (let pid in players) {
+                    if (pid === myId) continue;
+                    const p = players[pid];
+                    if (p.peerId && getPlayerRoom(p) === window.currentJoinedRoomId) {
+                        const call = peer.call(p.peerId, screenStream, { metadata: { type: 'screenshare' } });
+                        screenCalls[p.peerId] = call;
+                    }
+                }
+                createScreenShareWindow('local', screenStream, true);
+                const btn = document.getElementById('ssToggleBtn');
+                btn.innerText = "📺 Stop Screen Share"; btn.style.background = "#dc3545";
+                screenStream.getVideoTracks()[0].onended = () => { stopScreenShare(); };
+            } catch (err) { console.error("Screen share error: ", err); }
+        }
+    }
+
+    function stopScreenShare() {
+        if (screenStream) { screenStream.getTracks().forEach(t => t.stop()); screenStream = null; }
+        for (let pid in screenCalls) { screenCalls[pid].close(); }
+        screenCalls = {};
+        const win = document.getElementById('ss-win-local');
+        if (win) win.remove(); delete activeScreenShares['local'];
+        const btn = document.getElementById('ssToggleBtn');
+        btn.innerText = "📺 Share Screen"; btn.style.background = "#00a8ff"; 
+        socket.emit('screenshare-stop'); 
+    }
+
+    socket.on('screenshare-stopped', (peerId) => { removeScreenShareWindow(peerId, false); });
+
+    function resetAFK() { if(isAfkWarningVisible) return; lastActivityTime = Date.now(); }
+    setInterval(() => { if (!gameActive || isAfkWarningVisible) return; if (Date.now() - lastActivityTime > AFK_LIMIT) triggerAFKWarning(); }, 5000);
+    function triggerAFKWarning() { isAfkWarningVisible = true; document.getElementById('afkModal').style.display = 'block'; resetKeys(); afkKickTimeout = setTimeout(() => kickPlayer(), KICK_DELAY); }
+    function imHere() { clearTimeout(afkKickTimeout); isAfkWarningVisible = false; document.getElementById('afkModal').style.display = 'none'; resetAFK(); }
+    
+    function kickPlayer() { 
+        gameActive = false; socket.disconnect(); 
+        if(rawMicStream) rawMicStream.getTracks().forEach(track => track.stop()); 
+        if(localCamStream) localCamStream.getTracks().forEach(track => track.stop()); 
+        if(peer) peer.destroy(); 
+        document.getElementById('audioContainer').innerHTML = ''; document.getElementById('video-layer').innerHTML = '';
+        for (let pid in calls) { if(calls[pid]) calls[pid].close(); }
+        for (let pid in peerGainNodes) { if(peerGainNodes[pid]) peerGainNodes[pid].disconnect(); }
+        document.getElementById('afkModal').style.display = 'none'; document.getElementById('kickedScreen').style.display = 'flex'; 
+    }
+
+    function resetKeys() { keys = {}; }
+    window.addEventListener('blur', resetKeys);
+
+    window.addEventListener('keydown', (e) => {
+        if (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "TEXTAREA") {
+            if (e.key === 'Enter') {
+                if (document.activeElement.id === 'chatInput') {
+                    const text = document.activeElement.value.trim();
+                    if (text !== "") { socket.emit('sendChat', text); }
+                    document.activeElement.value = ""; 
+                    document.getElementById('chatBox').style.display = 'none'; 
+                    canvas.focus(); 
+                    e.preventDefault();
+                } else if (document.activeElement.id === 'sharedNotes') {
+                    if (!e.shiftKey) {
+                        e.preventDefault();
+                        document.activeElement.blur();
+                        canvas.focus();
+                    }
+                } else if (document.activeElement.id === 'musicInput') {
+                    addMusic();
+                } else {
+                    if (document.activeElement.id === 'nickInput') startGame();
+                    if (document.activeElement.id === 'roomNameInput' || document.activeElement.id === 'roomPassInput') confirmRoom();
+                    if (document.activeElement.id === 'enterPassInput') submitPassword();
+                }
+            }
+            return; 
+        }
+
+        if (e.key === 'Enter') {
+            const chatBox = document.getElementById('chatBox');
+            const chatInput = document.getElementById('chatInput');
+            if (chatBox.style.display === 'none' || chatBox.style.display === '') {
+                chatBox.style.display = 'block'; chatInput.focus(); resetKeys();
+            }
+            e.preventDefault();
+            return;
+        }
+        
+        if (e.key === 'w' || e.key === 'a' || e.key === 's' || e.key === 'd' || e.key === 'W' || e.key === 'A' || e.key === 'S' || e.key === 'D') {
+            clickTargetX = null; clickTargetY = null;
+        }
+
+        if (e.key === 'f' || e.key === 'F') { toggleMic(); return; }
+        if (e.key === 'g' || e.key === 'G') { toggleWhiteboard(); return; }
+        if (e.key === 'h' || e.key === 'H') { toggleNotes(); return; }
+        if (e.key === 'c' || e.key === 'C') { toggleCamera(); return; }
+        if (e.key === 'm' || e.key === 'M') { toggleMusic(); return; }
+        
+        if (e.key === 'q' || e.key === 'Q') {
+            const picker = document.getElementById('emojiPicker');
+            const isHidden = window.getComputedStyle(picker).display === 'none';
+            if (isHidden) {
+                picker.style.display = 'flex';
+                if (picker.innerHTML === '') picker.innerHTML = '<div style="color:white; font-size:14px; text-align:center;">Emoji bulunamadı. Lütfen "public/emoji" klasörüne resim yükleyin.</div>';
+            } else { picker.style.display = 'none'; }
+            needsRedraw = true; resetAFK(); return;
+        }
+        
+        keys[e.key] = true;
+        if ((e.key === 'e' || e.key === 'E') && currentSlotId && !isAfkWarningVisible) { document.getElementById('createRoomUI').style.display = 'block'; resetKeys(); }
+        needsRedraw = true; resetAFK();
+    });
+    
+    window.addEventListener('keyup', (e) => { keys[e.key] = false; needsRedraw = true; });
+
+    function setupPeer() {
+        peer = new Peer(undefined);
+        peer.on('open', id => socket.emit('sendPeerId', id));
+        
+        peer.on('call', call => {
+            let callerId = Object.keys(players).find(id => players[id].peerId === call.peer);
+            
+            // DÜZELTME BAŞLANGICI: Katı kontrol kaldırıldı.
+            // Eskiden: if (!callerId || !checkIsConnected(...)) { close(); return; }
+            // Yeni Hali: Sadece callerId kontrolü yapıyoruz. Mesafe/Oda kontrolünü loop'a bırakıyoruz.
+            // Bu sayede "Ben odadayım ama sunucu sana henüz söylemedi" durumunda arama reddedilmez.
+            if (!callerId) {
+                // Eğer arayanı tanımıyorsak (oyunda yoksa) reddet.
+                // Ama oyundaysa, henüz "checkIsConnected" false bile olsa kabul et.
+                call.close(); 
+                return;
+            }
+            // DÜZELTME BİTİŞİ
+
+            if (call.metadata && call.metadata.type === 'screenshare') {
+                call.answer(); 
+                call.on('stream', remoteStream => {
+                    createScreenShareWindow(call.peer, remoteStream, false);
+                    const track = remoteStream.getVideoTracks()[0];
+                    if(track) { track.onended = () => { removeScreenShareWindow(call.peer, false); }; }
+                });
+                call.on('close', () => { removeScreenShareWindow(call.peer, false); });
+                return; 
+            }
+            if (call.metadata && call.metadata.type === 'camera') {
+                call.answer();
+                call.on('stream', remoteStream => {
+                    if (callerId) {
+                        let p = players[callerId];
+                        p.hasCamera = true;
+                        
+                        let video = camVideoCache[callerId];
+                        if (!video) {
+                            video = document.createElement('video');
+                            video.id = 'cam-vid-' + callerId;
+                            video.autoplay = true; video.playsInline = true;
+                            document.getElementById('video-layer').appendChild(video);
+                            camVideoCache[callerId] = video; 
+                        }
+                        video.srcObject = remoteStream;
+                        needsRedraw = true;
+                    }
+                });
+                call.on('close', () => { 
+                    if(callerId) {
+                        players[callerId].hasCamera = false;
+                        let v = camVideoCache[callerId];
+                        if(v) { v.remove(); delete camVideoCache[callerId]; }
+                        needsRedraw = true;
+                    }
+                });
+                return;
+            }
+
+            playSoundEffect('join'); call.answer(processedStream); 
+
+            call.on('stream', remoteStream => {
+                if (peerAudioElements[call.peer]) return; 
+                const audio = document.createElement('audio'); 
+                audio.srcObject = remoteStream; audio.play().catch(e=>console.log(e));
+                document.getElementById('audioContainer').appendChild(audio);
+                peerAudioElements[call.peer] = audio;
+
+                const source = audioContext.createMediaElementSource(audio);
+                const gainNode = audioContext.createGain();
+                gainNode.gain.value = userVolumes[call.peer] !== undefined ? userVolumes[call.peer] : 1.0;
+                
+                source.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+                peerGainNodes[call.peer] = gainNode;
+
+                attachAnalyser(remoteStream, call.peer);
+            });
+
+            call.on('close', () => { 
+                playSoundEffect('leave'); 
+                if(userAnalysers[call.peer]) delete userAnalysers[call.peer]; 
+                if(peerAudioElements[call.peer]) { peerAudioElements[call.peer].remove(); delete peerAudioElements[call.peer]; }
+                if(peerGainNodes[call.peer]) { peerGainNodes[call.peer].disconnect(); delete peerGainNodes[call.peer]; }
+                delete calls[call.peer]; 
+            });
+            
+            call.on('error', (err) => {
+                 console.warn("Call error:", err);
+                 // Hata durumunda da temizlik yap, böylece loop tekrar deneyebilir.
+                 if(calls[call.peer]) delete calls[call.peer];
+            });
+            
+            calls[call.peer] = call; 
+        });
+    }
+
+    socket.on('roomSync', data => {
+        if(data.whiteboard && data.whiteboard.length > 0) {
+            data.whiteboard.forEach(draw => {
+                drawOnWhiteboard(draw.x0, draw.y0, draw.x1, draw.y1, draw.color, draw.width);
+            });
+        }
+        if(data.notepad) {
+            document.getElementById('sharedNotes').value = data.notepad;
+        }
+        if(data.music) {
+            updateMusicUI(data.music);
+            syncMusicPlayer(data.music);
+        }
+    });
+
+    socket.on('initWorld', (data) => { 
+        slots = data.slots; rooms = data.rooms; players = data.players; myId = socket.id; 
+        if(data.ball) ball = data.ball;
+        
+        if(data.emojis && data.emojis.length > 0) {
+            const picker = document.getElementById('emojiPicker');
+            picker.innerHTML = '';
+            data.emojis.forEach(e => {
+                let img = document.createElement('img');
+                img.src = '/emoji/' + e; img.className = 'emoji-item';
+                img.onclick = () => { socket.emit('sendEmoji', e); picker.style.display = 'none'; canvas.focus(); };
+                picker.appendChild(img);
+                let pre = new Image(); pre.src = '/emoji/' + e; loadedEmojis[e] = pre; 
+            });
+        }
+        needsRedraw = true;
+    });
+
+    socket.on('updateBall', (data) => {
+        ball = data;
+        needsRedraw = true;
+    });
+
+    socket.on('goal', (side) => {
+        console.log("GOAL! " + side);
+    });
+
+    socket.on('showEmoji', data => {
+        if(players[data.id]) { players[data.id].activeEmoji = data.emoji; players[data.id].emojiTimeout = Date.now() + 3000; needsRedraw = true;}
+    });
+
+    socket.on('chatMessage', data => {
+        const me = players[myId]; if (!me) return;
+        let isVisible = false;
+        let myRoom = getPlayerRoom(me); 
+        
+        if (data.roomId) { 
+            if (myRoom === data.roomId) isVisible = true; 
+        } else { 
+            isVisible = true; 
+        }
+
+        if (isVisible && players[data.id]) {
+            players[data.id].chatMessage = data.text;
+            players[data.id].chatTimeout = Date.now() + 4000; 
+            needsRedraw = true;
+        }
+    });
+
+    socket.on('camera-stopped', pid => {
+        if(players[pid]) {
+            players[pid].hasCamera = false;
+            let v = camVideoCache[pid];
+            if(v) { v.remove(); delete camVideoCache[pid]; }
+            needsRedraw = true;
+        }
+    });
+
+    socket.on('playerJoined', p => { players[p.id] = p; needsRedraw = true; });
+    socket.on('playerMoved', d => { if(players[d.id]) { players[d.id].x = d.x; players[d.id].y = d.y; players[d.id].dirX = d.dirX; players[d.id].dirY = d.dirY; needsRedraw = true;} });
+    
+    socket.on('playerLeft', id => {
+        let v = camVideoCache[id];
+        if(v) { v.remove(); delete camVideoCache[id]; }
+        delete players[id];
+        needsRedraw = true;
+    });
+
+    socket.on('updatePlayerPeer', d => { if(players[d.id]) players[d.id].peerId = d.peerId; });
+    socket.on('roomUpdate', d => { if (d.type === 'create') rooms[d.room.id] = d.room; if (d.type === 'destroy') delete rooms[d.slotId]; window.lastRoomUsersHash = ""; needsRedraw=true;});
+    
+    socket.on('passwordResult', (res) => { 
+        if (res.success) { unlockedRooms.push(res.slotId); closeUI('enterPassUI'); resetKeys(); } 
+        else { alert(res.message || "Yanlış Şifre!"); if(players[myId]) players[myId].y += 20; needsRedraw = true;} 
+    });
+
+    let dpr = window.devicePixelRatio || 1;
+    function resizeCanvas() {
+        dpr = window.devicePixelRatio || 1;
+        canvas.width = window.innerWidth * dpr;
+        canvas.height = window.innerHeight * dpr;
+        canvas.style.width = window.innerWidth + 'px';
+        canvas.style.height = window.innerHeight + 'px';
+        needsRedraw = true;
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas(); 
+
+    function loop() {
+        if(!gameActive || !players[myId]) { requestAnimationFrame(loop); return; }
+
+        let anyCameraActive = false;
+        let anySpeaking = false;
+        
+        for (let pid in players) {
+            if (players[pid].hasCamera) anyCameraActive = true;
+            if (pid === myId && !isMicMuted && myAnalyser) {
+                const dataArray = new Uint8Array(myAnalyser.frequencyBinCount); myAnalyser.getByteFrequencyData(dataArray);
+                for(let i=0; i<dataArray.length; i++) { if(dataArray[i] > TALK_THRESHOLD) { anySpeaking = true; break; } }
+            } else if (players[pid].peerId && isUserSpeaking(players[pid].peerId)) { anySpeaking = true; }
+            if(players[pid].emojiTimeout > Date.now()) needsRedraw = true;
+            if(players[pid].chatTimeout > Date.now()) needsRedraw = true;
+        }
+
+        if(ball && (Math.abs(ball.vx) > 0.1 || Math.abs(ball.vy) > 0.1)) needsRedraw = true;
+
+        handleMovement();
+
+        if (needsRedraw || anyCameraActive || anySpeaking) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const me = players[myId];
+            ctx.save(); 
+            
+            ctx.scale(dpr, dpr);
+            
+            ctx.translate(window.innerWidth/2, window.innerHeight/2); 
+            ctx.scale(cameraZoom, cameraZoom); 
+            ctx.translate(-me.x - PLAYER_SIZE/2, -me.y - PLAYER_SIZE/2);
+            
+            drawWorldElements(); 
+            drawPlayers();
+            
+            ctx.restore();
+            drawMinimap(); 
+            
+            needsRedraw = false; 
+        }
+        
+        checkVoiceAndProximity(players[myId]); 
+        requestAnimationFrame(loop);
+    }
+
+    function drawMinimap() {
+        const mapSize = 200; const margin = 20;
+        const startX = window.innerWidth - mapSize - margin; 
+        const startY = window.innerHeight - mapSize - margin;
+
+        ctx.save(); 
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0); 
+        
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; ctx.fillRect(startX, startY, mapSize, mapSize);
+        ctx.strokeStyle = '#00a8ff'; ctx.lineWidth = 2; ctx.strokeRect(startX, startY, mapSize, mapSize);
+
+        let maxX = 0, maxY = 0;
+        slots.forEach(s => {
+            if(s.x + (s.w || 250) > maxX) maxX = s.x + (s.w || 250);
+            if(s.y + (s.h || 250) > maxY) maxY = s.y + (s.h || 250);
+        });
+        maxX += 200; maxY += 200; 
+
+        const scaleX = mapSize / Math.max(maxX, maxY); const scaleY = mapSize / Math.max(maxX, maxY);
+
+        slots.forEach(s => {
+            const sW = s.w || 250; const sH = s.h || 250;
+            ctx.fillStyle = rooms[s.id] ? 'rgba(255, 0, 60, 0.5)' : 'rgba(0, 168, 255, 0.3)';
+            if(s.type === 'stadium') ctx.fillStyle = 'rgba(0, 255, 0, 0.3)';
+            ctx.fillRect(startX + s.x * scaleX, startY + s.y * scaleY, sW * scaleX, sH * scaleY);
+        });
+
+        for(let id in players) {
+            const p = players[id];
+            ctx.fillStyle = (id === myId) ? '#00ff00' : '#ffffff';
+            ctx.beginPath(); ctx.arc(startX + (p.x + PLAYER_SIZE/2) * scaleX, startY + (p.y + PLAYER_SIZE/2) * scaleY, 3, 0, Math.PI*2); ctx.fill();
+        }
+        ctx.restore();
+    }
+
+    function drawWorldElements() {
+        ctx.strokeStyle = '#222'; ctx.lineWidth = 2; ctx.beginPath();
+        for(let i=0; i<6000; i+=100) { ctx.moveTo(i,0); ctx.lineTo(i,6000); ctx.moveTo(0,i); ctx.lineTo(6000,i); } ctx.stroke();
+
+        slots.forEach(slot => {
+            const room = rooms[slot.id]; const sW = slot.w || SLOT_SIZE; const sH = slot.h || SLOT_SIZE; const x = slot.x, y = slot.y;
+
+            if(slot.type === 'stadium') {
+                ctx.fillStyle = '#2d3436'; 
+                ctx.fillRect(x - 50, y - 50, sW + 100, sH + 100); 
+
+                ctx.fillStyle = '#27ae60'; 
+                ctx.fillRect(x, y, sW, sH);
+                
+                ctx.strokeStyle = 'white'; ctx.lineWidth = 5;
+                ctx.strokeRect(x, y, sW, sH); 
+                
+                ctx.beginPath(); ctx.moveTo(x + sW/2, y); ctx.lineTo(x + sW/2, y + sH); ctx.stroke(); 
+                ctx.beginPath(); ctx.arc(x + sW/2, y + sH/2, 70, 0, Math.PI*2); ctx.stroke(); 
+
+                const goalSize = 200;
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+                ctx.fillRect(x - 40, y + sH/2 - goalSize/2, 40, goalSize); 
+                ctx.fillRect(x + sW, y + sH/2 - goalSize/2, 40, goalSize); 
+                
+                ctx.fillStyle = 'white'; ctx.font = "bold 40px Arial"; ctx.textAlign = "center";
+                ctx.fillText("⚽ STADIUM", x + sW/2, y - 20);
+
+            } else if (!room) {
+                ctx.strokeStyle = '#00a8ff'; ctx.lineWidth = 2; ctx.strokeRect(x, y, sW, sH); ctx.fillStyle = 'rgba(0, 168, 255, 0.1)'; ctx.fillRect(x, y, sW, sH);
+                if(slot.type === 'conference') {
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.2)'; ctx.font = "bold 100px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+                    ctx.fillText("C", x + sW/2, y + sH/2);
+                }
+            } else {
+                ctx.strokeStyle = '#ff003c'; ctx.lineWidth = 8; ctx.shadowColor = '#ff003c'; ctx.shadowBlur = 15;
+                ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + sW, y); ctx.moveTo(x, y); ctx.lineTo(x, y + sH); ctx.moveTo(x + sW, y); ctx.lineTo(x + sW, y + sH); 
+                const doorStart = x + (sW - DOOR_SIZE) / 2; ctx.moveTo(x, y + sH); ctx.lineTo(doorStart, y + sH); ctx.moveTo(doorStart + DOOR_SIZE, y + sH); ctx.lineTo(x + sW, y + sH); ctx.stroke();
+                
+                ctx.shadowBlur = 0; ctx.fillStyle = 'white'; ctx.font = "bold 24px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+                let displayName = room.name; if (room.hasPassword && !unlockedRooms.includes(room.id) && room.owner !== myId) displayName = "🔒 " + room.name;
+                ctx.fillText(displayName, x + sW/2, y - 15); 
+                ctx.fillStyle = 'rgba(255, 0, 60, 0.1)'; ctx.fillRect(x, y, sW, sH);
+            }
+        });
+
+        if (ball) {
+            ctx.save();
+            ctx.shadowBlur = 10; ctx.shadowColor = "white";
+            ctx.fillStyle = "white"; ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI*2); ctx.fill();
+            ctx.strokeStyle = "black"; ctx.lineWidth = 2; ctx.stroke();
+            ctx.restore();
+        }
+    }
+
+    function drawPlayers() {
+        for (let id in players) {
+            const p = players[id];
+            const cx = p.x + PLAYER_SIZE/2; const cy = p.y + PLAYER_SIZE/2;
+            
+            let isSpeaking = false;
+            if (id === myId) {
+                if (!isMicMuted && myAnalyser) {
+                    const dataArray = new Uint8Array(myAnalyser.frequencyBinCount);
+                    myAnalyser.getByteFrequencyData(dataArray);
+                    let peak = 0; for(let i=0; i<dataArray.length; i++) { if(dataArray[i] > peak) peak = dataArray[i]; }
+                    isSpeaking = peak > TALK_THRESHOLD; if(isSpeaking) resetAFK();
+                }
+            } else if (p.peerId) { isSpeaking = isUserSpeaking(p.peerId); }
+
+            if (isSpeaking) {
+                ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, PLAYER_SIZE, 0, Math.PI * 2);
+                ctx.fillStyle = "rgba(0, 255, 0, 0.4)"; ctx.shadowBlur = 15; ctx.shadowColor = "#00ff00"; ctx.fill(); ctx.restore();
+            }
+
+            let img = loadedAvatars[p.avatar] || loadedAvatars['usr1.png'];
+            ctx.drawImage(img, p.x, p.y, PLAYER_SIZE, PLAYER_SIZE);
+            
+            let dirX = p.dirX !== undefined ? p.dirX : 0; let dirY = p.dirY !== undefined ? p.dirY : 1;
+            ctx.fillStyle = "white"; ctx.beginPath(); ctx.arc(cx + (dirX * 16), cy + (dirY * 16), 4, 0, Math.PI * 2); ctx.fill();
+
+            if (p.hasCamera) {
+                let vid = camVideoCache[p.id];
+                if (vid && vid.readyState === vid.HAVE_ENOUGH_DATA) {
+                    const camSize = 60;
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.arc(cx, p.y - 45, camSize/2, 0, Math.PI * 2);
+                    ctx.clip(); 
+                    ctx.drawImage(vid, cx - camSize/2, p.y - 45 - camSize/2, camSize, camSize);
+                    ctx.restore();
+                    
+                    ctx.beginPath(); ctx.arc(cx, p.y - 45, camSize/2, 0, Math.PI * 2);
+                    ctx.lineWidth = 3; ctx.strokeStyle = '#00a8ff'; ctx.stroke();
+                }
+            }
+
+            if (p.activeEmoji && p.emojiTimeout > Date.now()) {
+                let eImg = loadedEmojis[p.activeEmoji];
+                const emojiY = p.hasCamera ? (p.y - 105) : (p.y - 45);
+                if (eImg) { ctx.drawImage(eImg, cx - 20, emojiY, 40, 40); }
+            } else if (p.emojiTimeout && p.emojiTimeout <= Date.now()) { p.activeEmoji = null; }
+
+            if (p.chatMessage && p.chatTimeout > Date.now()) {
+                ctx.font = "bold 14px Arial";
+                const textWidth = ctx.measureText(p.chatMessage).width;
+                const bubbleWidth = textWidth + 24; const bubbleHeight = 34;
+                const bubbleX = cx - bubbleWidth / 2;
+                let bubbleY = p.y - 65;
+                if (p.hasCamera) bubbleY -= 60;
+                if (p.activeEmoji) bubbleY -= 50;
+
+                ctx.fillStyle = "white"; ctx.beginPath(); ctx.roundRect(bubbleX, bubbleY, bubbleWidth, bubbleHeight, 8); ctx.fill();
+                ctx.beginPath(); ctx.moveTo(cx - 6, bubbleY + bubbleHeight); ctx.lineTo(cx + 6, bubbleY + bubbleHeight); ctx.lineTo(cx, bubbleY + bubbleHeight + 8); ctx.fill();
+                ctx.fillStyle = "black"; ctx.textAlign = "center"; ctx.fillText(p.chatMessage, cx, bubbleY + 22);
+            } else if (p.chatTimeout && p.chatTimeout <= Date.now()) { p.chatMessage = null; }
+
+            ctx.fillStyle = 'white'; ctx.font = "14px Arial"; ctx.textAlign = "center"; ctx.shadowColor="black"; ctx.shadowBlur=4;
+            ctx.fillText(escapeHtml(p.nickname), cx, p.y - 10); ctx.shadowBlur=0;
+        }
+    }
+
+    function handleMovement() {
+        const me = players[myId];
+        if(document.getElementById('enterPassUI').style.display === 'block' || document.getElementById('createRoomUI').style.display === 'block' || isAfkWarningVisible) return;
+        if (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "TEXTAREA") return;
+
+        let dx = 0, dy = 0; let cDirX = 0, cDirY = 0; let isMoving = false;
+        
+        if(keys['w'] || keys['W']) { dy = -SPEED; cDirY = -1; isMoving = true; }
+        if(keys['s'] || keys['S']) { dy = SPEED; cDirY = 1; isMoving = true; }
+        if(keys['a'] || keys['A']) { dx = -SPEED; cDirX = -1; isMoving = true; }
+        if(keys['d'] || keys['D']) { dx = SPEED; cDirX = 1; isMoving = true; }
+
+        if (!isMoving && clickTargetX !== null && clickTargetY !== null) {
+            const dxTarget = clickTargetX - me.x;
+            const dyTarget = clickTargetY - me.y;
+            const distToTarget = Math.sqrt(dxTarget*dxTarget + dyTarget*dyTarget);
+            
+            if (distToTarget > SPEED) {
+                dx = (dxTarget / distToTarget) * SPEED;
+                dy = (dyTarget / distToTarget) * SPEED;
+                cDirX = dxTarget / distToTarget; cDirY = dyTarget / distToTarget;
+                isMoving = true;
+            } else {
+                clickTargetX = null; clickTargetY = null;
+            }
+        }
+
+        if (isMoving) { 
+            let mag = Math.sqrt(cDirX*cDirX + cDirY*cDirY); me.dirX = cDirX / mag; me.dirY = cDirY / mag; 
+            needsRedraw = true; 
+        }
+
+        for (let pid in players) {
+            if (pid === myId) continue;
+            const other = players[pid];
+            const dist = Math.sqrt(Math.pow((me.x+20) - (other.x+20), 2) + Math.pow((me.y+20) - (other.y+20), 2));
+            if (dist < PLAYER_SIZE && dist > 0) { const pushX = ((me.x+20) - (other.x+20)) / dist; const pushY = ((me.y+20) - (other.y+20)) / dist; dx += pushX * 2; dy += pushY * 2; needsRedraw = true; }
+        }
+        if (dx !== 0 || dy !== 0) resetAFK();
+
+        const nextX = me.x + dx; const nextY = me.y + dy;
+        let canMoveX = !checkCollisionAndLock(nextX, me.y); let canMoveY = !checkCollisionAndLock(me.x, nextY);
+
+        if ((dx !== 0 && !canMoveX) || (dy !== 0 && !canMoveY)) {
+            clickTargetX = null; clickTargetY = null;
+        }
+
+        if (canMoveX) me.x = nextX; if (canMoveY) me.y = nextY;
+        
+        if (canMoveX || canMoveY || isMoving) { 
+            const now = Date.now();
+            if (now - lastMoveEmitTime > 60) {
+                socket.emit('move', { x: me.x, y: me.y, dirX: me.dirX, dirY: me.dirY }); 
+                lastMoveEmitTime = now;
+            }
+            checkZone(me); 
+        } else if (lastMoveEmitTime !== 0 && !isMoving) {
+            socket.emit('move', { x: me.x, y: me.y, dirX: me.dirX, dirY: me.dirY });
+            lastMoveEmitTime = 0;
+        }
+    }
+
+    function checkCollisionAndLock(tx, ty) {
+        const pRect = { x: tx, y: ty, w: PLAYER_SIZE, h: PLAYER_SIZE };
+        for (let key in rooms) {
+            const room = rooms[key]; const slot = slots.find(s => s.id === room.id); if(!slot) continue;
+            const sx = slot.x, sy = slot.y, sW = slot.w || SLOT_SIZE, sH = slot.h || SLOT_SIZE; 
+            const dStart = sx + (sW - DOOR_SIZE)/2;
+            
+            if (room.id === 'stadium_1') continue; 
+
+            const walls = [ { x: sx, y: sy, w: sW, h: 5 }, { x: sx, y: sy, w: 5, h: sH }, { x: sx + sW - 5, y: sy, w: 5, h: sH }, { x: sx, y: sy + sH - 5, w: dStart - sx, h: 5 }, { x: dStart + DOOR_SIZE, y: sy + sH - 5, w: (sx + sW) - (dStart + DOOR_SIZE), h: 5 } ];
+            for (let w of walls) { if (rectIntersect(pRect, w)) return true; }
+            const doorRect = { x: dStart, y: sy + sH - 10, w: DOOR_SIZE, h: 20 };
+            if (rectIntersect(pRect, doorRect)) {
+                if (room.hasPassword && !unlockedRooms.includes(room.id) && room.owner !== myId) {
+                    const wasInside = (players[myId].y < sy + sH); const isTryingToEnter = (ty < sy + sH); 
+                    if (!wasInside && isTryingToEnter) { 
+                        pendingUnlockSlotId = room.id; 
+                        document.getElementById('enterPassUI').style.display = 'block'; 
+                        resetKeys(); clickTargetX = null; clickTargetY = null;
+                        return true; 
+                    }
+                }
+            }
+        }
+        return false;
+    }
+    function rectIntersect(r1, r2) { return !(r2.x > r1.x + r1.w || r2.x + r2.w < r1.x || r2.y > r1.y + r1.h || r2.y + r2.h < r1.y); }
+    
+    function checkZone(player) {
+        let found = null; slots.forEach(slot => { 
+            const sW = slot.w || SLOT_SIZE; const sH = slot.h || SLOT_SIZE;
+            if (!rooms[slot.id] && player.x > slot.x && player.x < slot.x + sW && player.y > slot.y && player.y < slot.y + sH) { found = slot.id; } 
+        });
+        currentSlotId = found; document.getElementById('interaction-hint').style.display = currentSlotId ? 'block' : 'none';
+    }
+    
+    function confirmRoom() { const n = document.getElementById('roomNameInput').value; const p = document.getElementById('roomPassInput').value; if(n && currentSlotId) { socket.emit('createRoom', { slotId: currentSlotId, name: n, password: p }); closeUI('createRoomUI'); } }
+    function submitPassword() { const p = document.getElementById('enterPassInput').value; if (p && pendingUnlockSlotId) { socket.emit('checkPassword', { slotId: pendingUnlockSlotId, password: p }); } }
+    function closeUI(id) { document.getElementById(id).style.display = 'none'; resetKeys(); if(id === 'createRoomUI') { document.getElementById('roomNameInput').value = ""; document.getElementById('roomPassInput').value = ""; } if(id === 'enterPassUI') document.getElementById('enterPassInput').value = ""; canvas.focus(); }
+
+    function checkIsConnected(me, otherPlayer) {
+        let meRoom = getPlayerRoom(me);
+        let otherRoom = getPlayerRoom(otherPlayer);
+        if (meRoom && meRoom === otherRoom) return true;
+        if (!meRoom && !otherRoom) {
+            const dist = Math.sqrt(Math.pow(me.x - otherPlayer.x, 2) + Math.pow(me.y - otherPlayer.y, 2));
+            if (dist < MAX_HEAR_DISTANCE) return true;
+        }
+        return false;
+    }
+
+    function checkVoiceAndProximity(me) {
+        let inRoomId = getPlayerRoom(me);
+        
+        if (window.currentJoinedRoomId !== inRoomId) {
+            window.currentJoinedRoomId = inRoomId;
+            
+            if (!inRoomId) {
+                document.getElementById('whiteboardWindow').style.display = 'none';
+                document.getElementById('notesWindow').style.display = 'none'; 
+                document.getElementById('musicWindow').style.display = 'none'; 
+                document.getElementById('wbToggleBtn').style.display = 'none';
+                document.getElementById('notesToggleBtn').style.display = 'none'; 
+                document.getElementById('musicToggleBtn').style.display = 'none';
+                document.getElementById('ssToggleBtn').style.display = 'none';
+                
+                document.getElementById('musicList').innerHTML = "";
+                document.getElementById('nowPlayingText').innerText = "Nothing";
+                currentMusic = null;
+                musicPlaylist = [];
+
+                if(ytPlayer && ytPlayer.stopVideo) ytPlayer.stopVideo(); 
+
+                for(let id in activeScreenShares) { if(id !== 'local') removeScreenShareWindow(id, false); }
+                if(screenStream) stopScreenShare(); 
+            } else {
+                ctxWB.clearRect(0, 0, wbCanvas.width, wbCanvas.height); 
+                document.getElementById('sharedNotes').value = ""; 
+                document.getElementById('wbToggleBtn').style.display = 'block';
+                document.getElementById('notesToggleBtn').style.display = 'block';
+                document.getElementById('musicToggleBtn').style.display = 'block';
+                document.getElementById('ssToggleBtn').style.display = 'block';
+            }
+        }
+        
+        const statusDiv = document.getElementById('sesDurumu');
+        const usersDiv = document.getElementById('roomUsers');
+
+        if(inRoomId) {
+            const room = rooms[inRoomId];
+            if (room.hasPassword && !unlockedRooms.includes(inRoomId) && room.owner !== myId) { statusDiv.innerText = "Sound: Access Denied 🔒"; statusDiv.style.color = "red"; usersDiv.style.display = 'none'; return; }
+            statusDiv.innerText = `Voice: ${escapeHtml(room.name)} (Private)`; statusDiv.style.color = "#00a8ff";
+        } else {
+            statusDiv.innerText = "Voice: Public (Proximity)"; statusDiv.style.color = "#fbc531"; 
+        }
+
+        const usersToDisplay = []; 
+
+        for(let pid in players) {
+            if(pid === myId) continue;
+            const p = players[pid];
+            if(!p.peerId) continue;
+
+            const pRoom = getPlayerRoom(p);
+            let isConnected = false; let targetVolume = 1.0;
+
+            if (inRoomId && inRoomId === pRoom) {
+                isConnected = true; usersToDisplay.push(p);
+            } else if (!inRoomId && !pRoom) {
+                const dist = Math.sqrt(Math.pow(me.x - p.x, 2) + Math.pow(me.y - p.y, 2));
+                if (dist < MAX_HEAR_DISTANCE) { isConnected = true; targetVolume = 1.0 - (dist / MAX_HEAR_DISTANCE); usersToDisplay.push(p); }
+            }
+
+            if (isConnected && !calls[p.peerId]) {
+                if (myId > pid) {
+                    playSoundEffect('join'); const call = peer.call(p.peerId, processedStream);
+                    call.on('stream', remoteStream => {
+                        if (peerAudioElements[p.peerId]) return;
+                        const audio = document.createElement('audio'); 
+                        audio.srcObject = remoteStream; audio.play().catch(e=>console.log(e));
+                        document.getElementById('audioContainer').appendChild(audio); 
+                        peerAudioElements[p.peerId] = audio;
+                        
+                        const source = audioContext.createMediaElementSource(audio);
+                        const gainNode = audioContext.createGain();
+                        gainNode.gain.value = userVolumes[p.peerId] !== undefined ? userVolumes[p.peerId] : 1.0;
+                        source.connect(gainNode); gainNode.connect(audioContext.destination);
+                        peerGainNodes[p.peerId] = gainNode;
+
+                        attachAnalyser(remoteStream, call.peer); 
+                    });
+                    
+                    call.on('close', () => { 
+                        playSoundEffect('leave'); 
+                        if(userAnalysers[call.peer]) delete userAnalysers[call.peer]; 
+                        if(peerAudioElements[call.peer]) { peerAudioElements[call.peer].remove(); delete peerAudioElements[call.peer]; }
+                        if(peerGainNodes[call.peer]) { peerGainNodes[call.peer].disconnect(); delete peerGainNodes[call.peer]; }
+                        delete calls[call.peer]; 
+                    });
+                    
+                    // DÜZELTME: Giden aramaya da hata yakalayıcı eklendi
+                    call.on('error', (err) => {
+                        console.warn("Outbound call error:", err);
+                        if(calls[p.peerId]) delete calls[p.peerId];
+                    });
+                    
+                    calls[p.peerId] = call;
+
+                    if (screenStream && inRoomId && inRoomId === pRoom) {
+                        if (!screenCalls[p.peerId]) {
+                            const ssCall = peer.call(p.peerId, screenStream, { metadata: { type: 'screenshare' } });
+                            screenCalls[p.peerId] = ssCall;
+                        }
+                    }
+                }
+            } 
+            else if (!isConnected && calls[p.peerId]) {
+                calls[p.peerId].close();
+                if(userAnalysers[p.peerId]) delete userAnalysers[p.peerId];
+                if(peerAudioElements[p.peerId]) { peerAudioElements[p.peerId].remove(); delete peerAudioElements[p.peerId]; }
+                if(peerGainNodes[p.peerId]) { peerGainNodes[p.peerId].disconnect(); delete peerGainNodes[p.peerId]; }
+                delete calls[p.peerId];
+                if (screenCalls[p.peerId]) { screenCalls[p.peerId].close(); delete screenCalls[p.peerId]; removeScreenShareWindow(p.peerId, false); }
+            }
+
+            if (isConnected && localCamStream) {
+                if (!camCalls[p.peerId]) {
+                    const cCall = peer.call(p.peerId, localCamStream, { metadata: { type: 'camera' } });
+                    camCalls[p.peerId] = cCall;
+                }
+            } else if (!isConnected && camCalls[p.peerId]) {
+                camCalls[p.peerId].close(); delete camCalls[p.peerId];
+                let v = camVideoCache[p.id]; if(v) { v.remove(); delete camVideoCache[p.id]; }
+            }
+
+            if (isConnected && peerGainNodes[p.peerId]) {
+                let userChosenVol = userVolumes[p.peerId] !== undefined ? userVolumes[p.peerId] : 1;
+                peerGainNodes[p.peerId].gain.value = targetVolume * userChosenVol;
+            }
+        }
+
+        const currentHash = usersToDisplay.map(u => u.id).sort().join(',');
+        if (window.lastRoomUsersHash !== currentHash) {
+            window.lastRoomUsersHash = currentHash;
+            if (usersToDisplay.length > 0 || inRoomId) {
+                usersDiv.style.display = 'block';
+                let headerText = inRoomId ? `In the room (${usersToDisplay.length + 1})` : `Nearby (${usersToDisplay.length + 1})`;
+                let html = `<b style="color:#00a8ff; border-bottom:1px solid #555; display:block; margin-bottom:10px;">${headerText}</b>`;
+                html += `<div style="margin-bottom:8px; color:#aaa;">${escapeHtml(me.nickname)} (You)</div>`;
+                usersToDisplay.forEach(u => {
+                    let vol = userVolumes[u.peerId] !== undefined ? userVolumes[u.peerId] : 1;
+                    html += `<div style="margin-bottom:10px; display:flex; align-items:center; justify-content:space-between; gap:10px;"><span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:80px; font-weight:bold;" title="${escapeHtml(u.nickname)}">${escapeHtml(u.nickname)}</span><input type="range" class="vol-slider" min="0" max="3" step="0.1" value="${vol}" oninput="changeVolume('${u.peerId}', this.value)" style="width:70px;"></div>`;
+                });
+                usersDiv.innerHTML = html;
+            } else { usersDiv.style.display = 'none'; }
+        }
+    }
+
+    function getPlayerRoom(p) {
+        for (let key in rooms) {
+            const slot = slots.find(s => s.id === rooms[key].id);
+            const sW = slot.w || SLOT_SIZE; const sH = slot.h || SLOT_SIZE;
+            if (p.x > slot.x && p.x < slot.x + sW && p.y > slot.y && p.y < slot.y + sH) { return rooms[key].id; }
+        }
+        return null;
+    }
+</script>
+</body>
+</html>
