@@ -3,7 +3,7 @@
 ![License](https://img.shields.io/badge/license-MIT-blue.svg) ![Node.js](https://img.shields.io/badge/node->=14.0.0-green.svg) ![Socket.io](https://img.shields.io/badge/socket.io-4.x-orange)
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/05e334fc-c120-441b-bc59-0e302aab0397" width="600" title="ActiveRest Dashboard">
+  <img src="https://raw.githubusercontent.com/furkiak/locmind/refs/heads/main/Locmind.png" width="600" title="ActiveRest Dashboard">
 </p>
 
  
