@@ -15,17 +15,15 @@ const GRID_ROWS = 6;
 const PLAYER_SIZE = 40;
 const DOOR_SIZE = 70;
 
-// YENİ: Futbol Sahası Sabitleri
 const FOOTBALL_FIELD = {
     id: 'stadium_1',
-    x: 1800, // Haritanın en sağına
+    x: 1800, 
     y: 100,
-    w: 1200, // Devasa genişlik
-    h: 800,  // Devasa yükseklik
+    w: 1200, 
+    h: 800,  
     goalSize: 200
 };
 
-// YENİ: Topun durumu
 let ball = {
     x: FOOTBALL_FIELD.x + FOOTBALL_FIELD.w / 2,
     y: FOOTBALL_FIELD.y + FOOTBALL_FIELD.h / 2,
@@ -37,7 +35,6 @@ let ball = {
 const MAP_SLOTS = [];
 let slotCounter = 1;
 
-// SOL TARAFTAKİ KONFERANS ODALARI
 for (let row = 0; row < GRID_ROWS; row++) {
     if (row < 4) {
         for (let col = 0; col < 4; col++) {
@@ -47,7 +44,7 @@ for (let row = 0; row < GRID_ROWS; row++) {
                 y: 100 + row * (SLOT_SIZE + GAP),
                 w: SLOT_SIZE,
                 h: SLOT_SIZE,
-                type: 'conference' // C harfi için işaret
+                type: 'conference' 
             });
         }
     } else if (row === 4) {
@@ -75,14 +72,13 @@ for (let row = 0; row < GRID_ROWS; row++) {
     }
 }
 
-// YENİ: Futbol Sahasını harita slotlarına ekle
 MAP_SLOTS.push({
     id: FOOTBALL_FIELD.id,
     x: FOOTBALL_FIELD.x,
     y: FOOTBALL_FIELD.y,
     w: FOOTBALL_FIELD.w,
     h: FOOTBALL_FIELD.h,
-    type: 'stadium' // Özel tip
+    type: 'stadium' 
 });
 
 let players = {};
@@ -91,7 +87,6 @@ const rateLimits = {};
 const validEmojis = [];
 const validAvatars = ['usr1.png', 'usr2.png', 'usr3.png', 'usr4.png']; 
 
-// YENİ: Futbol sahası odasını sunucu açılır açılmaz oluştur (Sahibi yok, şifresi yok)
 rooms[FOOTBALL_FIELD.id] = {
     id: FOOTBALL_FIELD.id,
     name: "⚽ Football Arena",
@@ -128,21 +123,16 @@ function rectIntersect(r1, r2) {
     return !(r2.x > r1.x + r1.w || r2.x + r2.w < r1.x || r2.y > r1.y + r1.h || r2.y + r2.h < r1.y);
 }
 
-// YENİ: Top Fiziği Döngüsü (Server-Side Physics)
 setInterval(() => {
-    // 1. Sürtünme (Top yavaşlasın)
     ball.vx *= 0.95;
     ball.vy *= 0.95;
 
-    // Hız çok düşükse durdur (titremeyi önle)
     if (Math.abs(ball.vx) < 0.1) ball.vx = 0;
     if (Math.abs(ball.vy) < 0.1) ball.vy = 0;
 
-    // 2. Hareket
     let nextX = ball.x + ball.vx;
     let nextY = ball.y + ball.vy;
 
-    // 3. Duvar Çarpışmaları (Sadece Futbol Sahası içinde)
     const fX = FOOTBALL_FIELD.x;
     const fY = FOOTBALL_FIELD.y;
     const fW = FOOTBALL_FIELD.w;
@@ -150,22 +140,17 @@ setInterval(() => {
     const goalTop = fY + (fH - FOOTBALL_FIELD.goalSize) / 2;
     const goalBottom = fY + (fH + FOOTBALL_FIELD.goalSize) / 2;
 
-    // Sol/Sağ Duvarlar
     if (nextX - ball.radius < fX) {
-        // Sol tarafta mıyız?
         if (nextY > goalTop && nextY < goalBottom) {
-            // GOL! (Sol Kale)
             resetBall();
             io.emit('goal', 'left');
             return;
         } else {
             nextX = fX + ball.radius;
-            ball.vx = -ball.vx * 0.8; // Sekme
+            ball.vx = -ball.vx * 0.8; 
         }
     } else if (nextX + ball.radius > fX + fW) {
-        // Sağ tarafta mıyız?
         if (nextY > goalTop && nextY < goalBottom) {
-            // GOL! (Sağ Kale)
             resetBall();
             io.emit('goal', 'right');
             return;
@@ -175,7 +160,6 @@ setInterval(() => {
         }
     }
 
-    // Üst/Alt Duvarlar
     if (nextY - ball.radius < fY) {
         nextY = fY + ball.radius;
         ball.vy = -ball.vy * 0.8;
@@ -187,32 +171,11 @@ setInterval(() => {
     ball.x = nextX;
     ball.y = nextY;
 
-    // 4. Oyuncu - Top Çarpışması (Oyuncular topu iter)
-    for (let id in players) {
-        const p = players[id];
-        // Basit daire çarpışması (Oyuncuyu 20px yarıçaplı daire sayalım)
-        const dx = (p.x + PLAYER_SIZE/2) - ball.x;
-        const dy = (p.y + PLAYER_SIZE/2) - ball.y;
-        const dist = Math.sqrt(dx*dx + dy*dy);
-        const minDist = 20 + ball.radius; // Oyuncu yarıçapı + Top yarıçapı
-
-        if (dist < minDist) {
-            // Çarpışma var! Oyuncudan topa doğru vektör
-            const angle = Math.atan2(dy, dx);
-            const force = 2.0; // İtme gücü
-            
-            // Topu oyuncunun ters yönüne it
-            ball.vx -= Math.cos(angle) * force;
-            ball.vy -= Math.sin(angle) * force;
-        }
-    }
-
-    // Eğer top hareket ediyorsa herkese bildir
     if (Math.abs(ball.vx) > 0 || Math.abs(ball.vy) > 0) {
         io.emit('updateBall', ball);
     }
 
-}, 30); // 30ms'de bir fizik güncellemesi
+}, 30); 
 
 function resetBall() {
     ball.x = FOOTBALL_FIELD.x + FOOTBALL_FIELD.w / 2;
@@ -248,10 +211,29 @@ io.on('connection', (socket) => {
             unlockedRooms: new Set() 
         };
 
-        // Başlangıçta topun yerini de yolla
         socket.emit('initWorld', { slots: MAP_SLOTS, rooms: getSafeRooms(), players: players, emojis: validEmojis, ball: ball });
         const emitPlayer = {...players[socket.id], unlockedRooms: []};
         socket.broadcast.emit('playerJoined', emitPlayer);
+    });
+
+    socket.on('kickBall', () => {
+        const p = players[socket.id];
+        if (!p) return;
+        
+        io.emit('playerKicked', socket.id);
+
+        const dx = ball.x - (p.x + PLAYER_SIZE/2);
+        const dy = ball.y - (p.y + PLAYER_SIZE/2);
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        const kickRadius = 60; 
+
+        if (dist < kickRadius + ball.radius) {
+            const angle = Math.atan2(dy, dx);
+            const force = 20.0; 
+            ball.vx += Math.cos(angle) * force;
+            ball.vy += Math.sin(angle) * force;
+            io.emit('updateBall', ball);
+        }
     });
 
     socket.on('sendEmoji', (emojiName) => {
@@ -428,13 +410,8 @@ io.on('connection', (socket) => {
             const sx = slot.x, sy = slot.y, sW = slot.w || SLOT_SIZE, sH = slot.h || SLOT_SIZE; 
             const dStart = sx + (sW - DOOR_SIZE)/2;
             
-            // YENİ: Futbol sahasının kapısı yok, tamamen açık gibi davranır (duvarları index.html çizer)
-            // Ama yine de dış duvarlara çarpma kontrolü ekleyelim.
             if (room.id === FOOTBALL_FIELD.id) {
-                // Futbol sahasına girmek/çıkmak serbest, sadece duvarlarına bak
-                // Burada "duvar" mantığını biraz esnetiyoruz, oyuncu her yerden girebilir
-                // Sadece odanın içinde kilitli kalma vb. olmasın.
-                continue; // Çarpışma kontrolünü pas geç (serbest giriş)
+                continue; 
             }
 
             const walls = [ 
@@ -475,8 +452,8 @@ io.on('connection', (socket) => {
         let isAuthorized = false;
         const room = rooms[calculatedRoomId];
         if (calculatedRoomId) {
-            if (!room) isAuthorized = true; // Boş arsa
-            else if (room.id === FOOTBALL_FIELD.id) isAuthorized = true; // Herkes girebilir
+            if (!room) isAuthorized = true; 
+            else if (room.id === FOOTBALL_FIELD.id) isAuthorized = true; 
             else if (!room.password) isAuthorized = true; 
             else if (room.owner === socket.id) isAuthorized = true; 
             else if (p.unlockedRooms.has(calculatedRoomId)) isAuthorized = true; 
@@ -512,7 +489,6 @@ io.on('connection', (socket) => {
         if (!checkRateLimit(socket.id, 'createRoom', 1, 3000)) return;
         const { slotId, name, password } = data;
         
-        // Stadyum slotuna oda kurulamaz
         if (slotId === FOOTBALL_FIELD.id) return;
 
         const safeName = escapeHTML(name).substring(0, 20);
@@ -584,7 +560,6 @@ io.on('connection', (socket) => {
 
     function checkEmptyRooms() {
         for (const roomId in rooms) {
-            // Stadyum asla silinmez
             if (roomId === FOOTBALL_FIELD.id) continue;
 
             const slot = MAP_SLOTS.find(s => s.id === roomId);
