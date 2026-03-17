@@ -159,6 +159,11 @@
 </head>
 <body>
 
+    <button id="mobileKeyboardBtn" style="display: none; position: absolute; top: 10px; right: 10px; z-index: 10; padding: 12px 18px; background: rgba(0,0,0,0.6); color: #00a8ff; border: 1px solid #00a8ff; border-radius: 8px; font-size: 20px; cursor: pointer;">
+        <i class="fas fa-keyboard"></i>
+    </button>
+    <input type="text" id="hiddenKeyboardInput" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="position: fixed; opacity: 0; top: -1000px; left: -1000px; pointer-events: none;">
+
     <div id="audioContainer" style="display:none;"></div>
     <div id="video-layer"></div>
     <div id="hidden-yt-player"></div>
@@ -268,6 +273,8 @@
             <button id="micBtn" onclick="toggleMic()"><i class="fas fa-microphone"></i> Mic: ON (F)</button>
             <button id="camToggleBtn" class="action-btn" style="background:#6c757d; color:white;" onclick="toggleCamera()">📷 Camera OFF (C)</button>
             
+            <button id="kickBtn" class="action-btn" style="display:none; background:#ff9f43; color:white;" onclick="triggerKick()">⚽ Kick (Space)</button>
+            
             <button id="wbToggleBtn" class="action-btn" style="display:none;" onclick="toggleWhiteboard()">🎨 Whiteboard (G)</button>
             <button id="notesToggleBtn" class="action-btn" style="display:none; background:#28a745; color:white;" onclick="toggleNotes()">📝 Notepad (H)</button>
             <button id="musicToggleBtn" class="action-btn" style="display:none; background:#e056fd; color:white;" onclick="toggleMusic()">🎵 Music Box (M)</button>
@@ -290,6 +297,17 @@
     <canvas id="gameCanvas" tabindex="1"></canvas>
 
 <script>
+    if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+        document.getElementById('mobileKeyboardBtn').style.display = 'block';
+    }
+
+    document.getElementById('mobileKeyboardBtn').addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        const input = document.getElementById('hiddenKeyboardInput');
+        input.focus();
+        input.click();
+    });
+
     const socket = io();
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
@@ -388,7 +406,9 @@
     });
 
     canvas.addEventListener('pointerdown', (e) => {
-        if (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "TEXTAREA") return;
+        if (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "TEXTAREA") {
+            if (document.activeElement.id !== 'hiddenKeyboardInput') return;
+        }
         if (!gameActive || !players[myId]) return;
         
         const me = players[myId];
@@ -565,6 +585,13 @@
     }
 
     window.changeVolume = function(peerId, value) { userVolumes[peerId] = parseFloat(value); };
+
+    window.triggerKick = function() {
+        if (!gameActive) return;
+        socket.emit('kickBall');
+        if (players[myId]) players[myId].kickAnim = { radius: PLAYER_SIZE/2, alpha: 1.0 };
+        needsRedraw = true;
+    };
 
     window.toggleMic = function() {
         isMicMuted = !isMicMuted;
@@ -790,29 +817,33 @@
 
     window.addEventListener('keydown', (e) => {
         if (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "TEXTAREA") {
-            if (e.key === 'Enter') {
-                if (document.activeElement.id === 'chatInput') {
-                    const text = document.activeElement.value.trim();
-                    if (text !== "") { socket.emit('sendChat', text); }
-                    document.activeElement.value = ""; 
-                    document.getElementById('chatBox').style.display = 'none'; 
-                    canvas.focus(); 
-                    e.preventDefault();
-                } else if (document.activeElement.id === 'sharedNotes') {
-                    if (!e.shiftKey) {
+            if (document.activeElement.id === 'hiddenKeyboardInput') {
+                setTimeout(() => document.activeElement.value = '', 10);
+            } else {
+                if (e.key === 'Enter') {
+                    if (document.activeElement.id === 'chatInput') {
+                        const text = document.activeElement.value.trim();
+                        if (text !== "") { socket.emit('sendChat', text); }
+                        document.activeElement.value = ""; 
+                        document.getElementById('chatBox').style.display = 'none'; 
+                        canvas.focus(); 
                         e.preventDefault();
-                        document.activeElement.blur();
-                        canvas.focus();
+                    } else if (document.activeElement.id === 'sharedNotes') {
+                        if (!e.shiftKey) {
+                            e.preventDefault();
+                            document.activeElement.blur();
+                            canvas.focus();
+                        }
+                    } else if (document.activeElement.id === 'musicInput') {
+                        addMusic();
+                    } else {
+                        if (document.activeElement.id === 'nickInput') startGame();
+                        if (document.activeElement.id === 'roomNameInput' || document.activeElement.id === 'roomPassInput') confirmRoom();
+                        if (document.activeElement.id === 'enterPassInput') submitPassword();
                     }
-                } else if (document.activeElement.id === 'musicInput') {
-                    addMusic();
-                } else {
-                    if (document.activeElement.id === 'nickInput') startGame();
-                    if (document.activeElement.id === 'roomNameInput' || document.activeElement.id === 'roomPassInput') confirmRoom();
-                    if (document.activeElement.id === 'enterPassInput') submitPassword();
                 }
+                return; 
             }
-            return; 
         }
 
         if (e.key === 'Enter') {
@@ -820,6 +851,14 @@
             const chatInput = document.getElementById('chatInput');
             if (chatBox.style.display === 'none' || chatBox.style.display === '') {
                 chatBox.style.display = 'block'; chatInput.focus(); resetKeys();
+            }
+            e.preventDefault();
+            return;
+        }
+        
+        if (e.code === 'Space' || e.key === ' ') {
+            if (window.currentJoinedRoomId === 'stadium_1') {
+                triggerKick();
             }
             e.preventDefault();
             return;
@@ -859,17 +898,10 @@
         peer.on('call', call => {
             let callerId = Object.keys(players).find(id => players[id].peerId === call.peer);
             
-            // DÜZELTME BAŞLANGICI: Katı kontrol kaldırıldı.
-            // Eskiden: if (!callerId || !checkIsConnected(...)) { close(); return; }
-            // Yeni Hali: Sadece callerId kontrolü yapıyoruz. Mesafe/Oda kontrolünü loop'a bırakıyoruz.
-            // Bu sayede "Ben odadayım ama sunucu sana henüz söylemedi" durumunda arama reddedilmez.
             if (!callerId) {
-                // Eğer arayanı tanımıyorsak (oyunda yoksa) reddet.
-                // Ama oyundaysa, henüz "checkIsConnected" false bile olsa kabul et.
                 call.close(); 
                 return;
             }
-            // DÜZELTME BİTİŞİ
 
             if (call.metadata && call.metadata.type === 'screenshare') {
                 call.answer(); 
@@ -941,7 +973,6 @@
             
             call.on('error', (err) => {
                  console.warn("Call error:", err);
-                 // Hata durumunda da temizlik yap, böylece loop tekrar deneyebilir.
                  if(calls[call.peer]) delete calls[call.peer];
             });
             
@@ -993,6 +1024,13 @@
 
     socket.on('showEmoji', data => {
         if(players[data.id]) { players[data.id].activeEmoji = data.emoji; players[data.id].emojiTimeout = Date.now() + 3000; needsRedraw = true;}
+    });
+    
+    socket.on('playerKicked', (id) => {
+        if (players[id] && id !== myId) {
+            players[id].kickAnim = { radius: PLAYER_SIZE/2, alpha: 1.0 };
+            needsRedraw = true;
+        }
     });
 
     socket.on('chatMessage', data => {
@@ -1057,6 +1095,7 @@
 
         let anyCameraActive = false;
         let anySpeaking = false;
+        let anyKickAnim = false;
         
         for (let pid in players) {
             if (players[pid].hasCamera) anyCameraActive = true;
@@ -1066,9 +1105,11 @@
             } else if (players[pid].peerId && isUserSpeaking(players[pid].peerId)) { anySpeaking = true; }
             if(players[pid].emojiTimeout > Date.now()) needsRedraw = true;
             if(players[pid].chatTimeout > Date.now()) needsRedraw = true;
+            if(players[pid].kickAnim && players[pid].kickAnim.alpha > 0) anyKickAnim = true;
         }
 
         if(ball && (Math.abs(ball.vx) > 0.1 || Math.abs(ball.vy) > 0.1)) needsRedraw = true;
+        if(anyKickAnim) needsRedraw = true;
 
         handleMovement();
 
@@ -1206,6 +1247,19 @@
                 ctx.fillStyle = "rgba(0, 255, 0, 0.4)"; ctx.shadowBlur = 15; ctx.shadowColor = "#00ff00"; ctx.fill(); ctx.restore();
             }
 
+            if (p.kickAnim && p.kickAnim.alpha > 0) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(cx, cy, p.kickAnim.radius, 0, Math.PI * 2);
+                ctx.strokeStyle = `rgba(255, 159, 67, ${p.kickAnim.alpha})`;
+                ctx.lineWidth = 4;
+                ctx.stroke();
+                ctx.restore();
+                
+                p.kickAnim.radius += 3;
+                p.kickAnim.alpha -= 0.06;
+            }
+
             let img = loadedAvatars[p.avatar] || loadedAvatars['usr1.png'];
             ctx.drawImage(img, p.x, p.y, PLAYER_SIZE, PLAYER_SIZE);
             
@@ -1256,7 +1310,9 @@
     function handleMovement() {
         const me = players[myId];
         if(document.getElementById('enterPassUI').style.display === 'block' || document.getElementById('createRoomUI').style.display === 'block' || isAfkWarningVisible) return;
-        if (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "TEXTAREA") return;
+        if (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "TEXTAREA") {
+            if (document.activeElement.id !== 'hiddenKeyboardInput') return;
+        }
 
         let dx = 0, dy = 0; let cDirX = 0, cDirY = 0; let isMoving = false;
         
@@ -1380,6 +1436,7 @@
                 document.getElementById('notesToggleBtn').style.display = 'none'; 
                 document.getElementById('musicToggleBtn').style.display = 'none';
                 document.getElementById('ssToggleBtn').style.display = 'none';
+                document.getElementById('kickBtn').style.display = 'none'; // Futbol sahası dışındayken gizli
                 
                 document.getElementById('musicList').innerHTML = "";
                 document.getElementById('nowPlayingText').innerText = "Nothing";
@@ -1390,6 +1447,25 @@
 
                 for(let id in activeScreenShares) { if(id !== 'local') removeScreenShareWindow(id, false); }
                 if(screenStream) stopScreenShare(); 
+
+            } else if (inRoomId === 'stadium_1') {
+                document.getElementById('whiteboardWindow').style.display = 'none';
+                document.getElementById('notesWindow').style.display = 'none'; 
+                document.getElementById('musicWindow').style.display = 'none'; 
+                document.getElementById('wbToggleBtn').style.display = 'none';
+                document.getElementById('notesToggleBtn').style.display = 'none'; 
+                document.getElementById('musicToggleBtn').style.display = 'none';
+                document.getElementById('ssToggleBtn').style.display = 'none';
+                document.getElementById('kickBtn').style.display = 'block'; // Sadece futbol sahasında açık
+                
+                document.getElementById('musicList').innerHTML = "";
+                document.getElementById('nowPlayingText').innerText = "Nothing";
+                currentMusic = null;
+                musicPlaylist = [];
+                if(ytPlayer && ytPlayer.stopVideo) ytPlayer.stopVideo(); 
+                for(let id in activeScreenShares) { if(id !== 'local') removeScreenShareWindow(id, false); }
+                if(screenStream) stopScreenShare(); 
+
             } else {
                 ctxWB.clearRect(0, 0, wbCanvas.width, wbCanvas.height); 
                 document.getElementById('sharedNotes').value = ""; 
@@ -1397,6 +1473,7 @@
                 document.getElementById('notesToggleBtn').style.display = 'block';
                 document.getElementById('musicToggleBtn').style.display = 'block';
                 document.getElementById('ssToggleBtn').style.display = 'block';
+                document.getElementById('kickBtn').style.display = 'none'; // Normal odada futbol yetenekleri kapalı
             }
         }
         
@@ -1455,7 +1532,6 @@
                         delete calls[call.peer]; 
                     });
                     
-                    // DÜZELTME: Giden aramaya da hata yakalayıcı eklendi
                     call.on('error', (err) => {
                         console.warn("Outbound call error:", err);
                         if(calls[p.peerId]) delete calls[p.peerId];
