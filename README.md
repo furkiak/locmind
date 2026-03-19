@@ -1,9 +1,9 @@
 # 🌌 Locmind - Virtual Universe
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg) ![Node.js](https://img.shields.io/badge/node->=14.0.0-green.svg) ![Socket.io](https://img.shields.io/badge/socket.io-4.x-orange)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg) ![JavaScript](https://img.shields.io/badge/javascript-%23323330.svg?style=for-the-badge&logo=javascript&logoColor=%23F7DF1E) ![NodeJS](https://img.shields.io/badge/node.js-6DA55F?style=for-the-badge&logo=node.js&logoColor=white) ![Socket.io](https://img.shields.io/badge/Socket.io-black?style=for-the-badge&logo=socket.io&badgeColor=010101)
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/furkiak/locmind/refs/heads/main/Locmind.png" width="600" title="ActiveRest Dashboard">
+  <img src="https://raw.githubusercontent.com/furkiak/locmind/refs/heads/main/SS.png" width="600" title="ActiveRest Dashboard">
 </p>
 
  
