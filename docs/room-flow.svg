@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 410" role="img" aria-labelledby="title desc">
+  <title id="title">Locmind room and media authorization flow</title>
+  <desc id="desc">Public users share public chat by proximity. A locked room contains two authorized members, while another room is isolated. Media offers require a one-use grant checked by the receiver.</desc>
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#0b1930"/><stop offset="1" stop-color="#1d3451"/></linearGradient>
+    <linearGradient id="glass" x2="1" y2="1"><stop stop-color="#345675" stop-opacity=".83"/><stop offset="1" stop-color="#20334c" stop-opacity=".86"/></linearGradient>
+  </defs>
+  <rect width="1000" height="410" rx="28" fill="url(#bg)"/>
+  <text x="40" y="52" fill="#a9cdfa" font-size="15" font-family="Arial,sans-serif" letter-spacing="3">LOCMIND · SOURCE FLOW</text>
+  <rect x="38" y="82" width="277" height="235" rx="22" fill="url(#glass)" stroke="#7caed7" stroke-opacity=".5"/>
+  <text x="63" y="121" fill="#f7fbff" font-size="23" font-weight="700" font-family="Arial,sans-serif">Public area</text>
+  <text x="63" y="150" fill="#c9dcef" font-size="16" font-family="Arial,sans-serif">Nearby chat and movement</text>
+  <circle cx="108" cy="219" r="30" fill="#aed7ff"/><text x="97" y="229" fill="#102238" font-size="27" font-family="Arial,sans-serif">A</text>
+  <circle cx="235" cy="219" r="30" fill="#96e0d3"/><text x="225" y="229" fill="#102238" font-size="27" font-family="Arial,sans-serif">B</text>
+  <path d="M145 219h50" stroke="#e4efff" stroke-width="4" stroke-dasharray="7 6"/>
+  <text x="64" y="285" fill="#d7e8f6" font-size="14" font-family="Arial,sans-serif">Server checks proximity for media</text>
+  <rect x="361" y="82" width="280" height="235" rx="22" fill="url(#glass)" stroke="#a9d3ff" stroke-width="2"/>
+  <text x="387" y="121" fill="#f7fbff" font-size="23" font-weight="700" font-family="Arial,sans-serif">Room 1 · locked</text>
+  <text x="387" y="150" fill="#c9dcef" font-size="16" font-family="Arial,sans-serif">Members only</text>
+  <circle cx="437" cy="219" r="30" fill="#afd0ff"/><text x="428" y="229" fill="#102238" font-size="27" font-family="Arial,sans-serif">C</text>
+  <circle cx="568" cy="219" r="30" fill="#ffd7ab"/><text x="558" y="229" fill="#102238" font-size="27" font-family="Arial,sans-serif">D</text>
+  <path d="M475 219h52" stroke="#e8f1ff" stroke-width="4"/>
+  <text x="386" y="285" fill="#d7e8f6" font-size="14" font-family="Arial,sans-serif">Chat stays in this Socket.IO room</text>
+  <rect x="686" y="82" width="275" height="235" rx="22" fill="url(#glass)" stroke="#7caed7" stroke-opacity=".5"/>
+  <text x="711" y="121" fill="#f7fbff" font-size="23" font-weight="700" font-family="Arial,sans-serif">Room 2</text>
+  <text x="711" y="150" fill="#c9dcef" font-size="16" font-family="Arial,sans-serif">Independent channel</text>
+  <circle cx="823" cy="219" r="30" fill="#d5c2ff"/><text x="813" y="229" fill="#102238" font-size="27" font-family="Arial,sans-serif">E</text>
+  <text x="716" y="285" fill="#d7e8f6" font-size="14" font-family="Arial,sans-serif">Cannot receive Room 1 packets</text>
+  <path d="M642 202h44" stroke="#ffb0bb" stroke-width="4" stroke-dasharray="5 7"/>
+  <path d="M668 189v27" stroke="#ffb0bb" stroke-width="4"/>
+  <text x="40" y="366" fill="#d8e9fb" font-size="16" font-family="Arial,sans-serif">Media offer → short-lived server grant → receiver verifies → answer or reject</text>
+  <text x="40" y="390" fill="#8daac7" font-size="12" font-family="Arial,sans-serif">Technical illustration · 1.1.0-beta.1 · not a product screenshot</text>
+</svg>

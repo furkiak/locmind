@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>How Locmind data works</title>
+<style>
+body{margin:0;background:#0d1d32;color:#eef5ff;font:16px/1.65 system-ui,sans-serif}
+main{max-width:700px;margin:0 auto;padding:42px 22px}
+h1{font-size:clamp(30px,5vw,44px);line-height:1.1}h2{margin-top:32px;font-size:20px}
+p,li{color:#c8d8ed}a{color:#b9dcff}ul{padding-left:22px}
+.card{background:#182c48;border:1px solid #416183;border-radius:18px;padding:22px}
+</style>
+<main>
+<p><a href="/">← Back to Locmind</a></p>
+<h1>How data works in this prototype</h1>
+<div class="card"><p>Locmind is a source project, not an account service. The server keeps avatar positions, room names, chat routing, whiteboard strokes, notes and music state in memory. Restarting the server loses them. The source does not create user accounts or persist chat to a database.</p></div>
+<h2>Media choices</h2>
+<ul>
+<li><strong>Explore silently</strong> requests no microphone or camera and does not connect to PeerJS.</li>
+<li><strong>Join with audio</strong> asks your browser for microphone access. PeerJS uses an external signaling service by default; other authorized peers receive WebRTC media directly when the connection succeeds.</li>
+<li>Camera and screen sharing are separate actions. The browser asks for access when you turn each on. The server issues short-lived, one-use media grants based on room or public proximity.</li>
+<li>Opening Music Box loads the YouTube iframe API. This connects to YouTube. It is not loaded for the initial page or silent room tour.</li>
+</ul>
+<h2>Limits</h2>
+<p>Room passwords protect access to a room in this prototype. The server stores a salted scrypt hash in memory, but room passwords are not account credentials or a substitute for authentication. Do not reuse an important password. There is no durable moderation, login, message retention policy or cross-server state synchronization. Host it over HTTPS when using browser media on another device or network. See the repository README for setup and network limitations.</p>
+</main>
+</html>

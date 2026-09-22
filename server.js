@@ -2,12 +2,26 @@ const express = require('express');
 const app = express();
 const http = require('http').createServer(app);
 const io = require('socket.io')(http, {
-    cors: { origin: "*", methods: ["GET", "POST"] } 
+    maxHttpBufferSize: 64 * 1024,
+    cors: { origin: (origin, callback) => callback(null, allowedOrigin(origin)), methods: ['GET', 'POST'] },
+    allowRequest: (request, callback) => callback(null, allowedOrigin(request.headers.origin))
 });
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+const { validPacket } = require('./protocol');
 
-app.use(express.static('public'));
+function allowedOrigin(origin) {
+    if (!origin) return true;
+    const allowed = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000,http://127.0.0.1:3000')
+        .split(',').map(value => value.trim());
+    return allowed.includes(origin);
+}
+
+app.use(express.static(path.join(__dirname, 'public')));
+app.use('/emoji', express.static(path.join(__dirname, 'emoji')));
+app.get('/vendor/peerjs.min.js', (_request, response) =>
+    response.sendFile(path.join(__dirname, 'node_modules', 'peerjs', 'dist', 'peerjs.min.js')));
 
 const SLOT_SIZE = 250;
 const GAP = 150;
@@ -81,9 +95,10 @@ MAP_SLOTS.push({
     type: 'stadium' 
 });
 
-let players = {};
-let rooms = {}; 
-const rateLimits = {}; 
+let players = Object.create(null);
+let rooms = Object.create(null);
+const rateLimits = Object.create(null);
+const mediaGrants = new Map();
 const validEmojis = [];
 const validAvatars = ['usr1.png', 'usr2.png', 'usr3.png', 'usr4.png']; 
 
@@ -91,7 +106,8 @@ rooms[FOOTBALL_FIELD.id] = {
     id: FOOTBALL_FIELD.id,
     name: "⚽ Football Arena",
     owner: "server",
-    password: null,
+    passwordHash: null,
+    passwordSalt: null,
     whiteboardHistory: [],
     notepadText: "Scoreboard:\nTeam A: 0\nTeam B: 0",
     musicPlaylist: [],
@@ -99,13 +115,9 @@ rooms[FOOTBALL_FIELD.id] = {
     songStartTime: 0
 };
 
-const emojiDir = path.join(__dirname, 'public', 'emoji');
+const emojiDir = path.join(__dirname, 'emoji');
 if (fs.existsSync(emojiDir)) {
     validEmojis.push(...fs.readdirSync(emojiDir).filter(f => f.match(/\.(png|gif|jpe?g)$/i)));
-}
-
-function escapeHTML(str) {
-    return String(str || '').replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
 function checkRateLimit(socketId, action, limit, timeWindowMs) {
@@ -119,11 +131,64 @@ function checkRateLimit(socketId, action, limit, timeWindowMs) {
     return true;
 }
 
+function passwordFields(password) {
+    if (!password) return { passwordHash: null, passwordSalt: null };
+    const passwordSalt = crypto.randomBytes(16).toString('hex');
+    const passwordHash = crypto.scryptSync(password, passwordSalt, 32).toString('hex');
+    return { passwordHash, passwordSalt };
+}
+
+function passwordMatches(room, candidate) {
+    if (!room?.passwordHash || !room.passwordSalt) return false;
+    const actual = Buffer.from(room.passwordHash, 'hex');
+    const supplied = crypto.scryptSync(candidate, room.passwordSalt, actual.length);
+    return crypto.timingSafeEqual(actual, supplied);
+}
+
+function publicRoom(room) {
+    return {
+        id: room.id, name: room.name, owner: room.owner,
+        hasPassword: !!room.passwordHash, whiteboardHistory: [], notepadText: '',
+        musicPlaylist: [], currentSong: null, songStartTime: 0
+    };
+}
+
+const eventRates = {
+    joinGame: [1, 5000], move: [30, 1000], sendChat: [3, 1000],
+    sendEmoji: [3, 1000], createRoom: [1, 3000], checkPassword: [4, 10000],
+    'wb-draw': [150, 1000], 'note-update': [20, 1000],
+    'media-authorize': [12, 1000], 'media-verify': [12, 1000]
+};
+
+function inSameAuthorizedRoom(a, b) {
+    if (!a.roomId || a.roomId !== b.roomId || !rooms[a.roomId]) return false;
+    const aSocket = io.sockets.sockets.get(a.id);
+    const bSocket = io.sockets.sockets.get(b.id);
+    return !!aSocket?.rooms.has(a.roomId) && !!bSocket?.rooms.has(a.roomId);
+}
+
+function canShareMedia(a, b, type) {
+    if (!a || !b || !a.peerId || !b.peerId || a.id === b.id) return false;
+    if (inSameAuthorizedRoom(a, b))
+        return type !== 'screenshare' || a.roomId !== FOOTBALL_FIELD.id;
+    if (type === 'screenshare' || a.roomId || b.roomId) return false;
+    return !!io.sockets.sockets.get(a.id)?.rooms.has('public') &&
+        !!io.sockets.sockets.get(b.id)?.rooms.has('public') &&
+        Math.hypot(a.x - b.x, a.y - b.y) < 400;
+}
+
+function revokeMedia(socket, peerIds) {
+    for (const id of peerIds) {
+        socket.emit('media-revoked', { id });
+        io.to(id).emit('media-revoked', { id: socket.id });
+    }
+}
+
 function rectIntersect(r1, r2) {
     return !(r2.x > r1.x + r1.w || r2.x + r2.w < r1.x || r2.y > r1.y + r1.h || r2.y + r2.h < r1.y);
 }
 
-setInterval(() => {
+const ballTimer = setInterval(() => {
     ball.vx *= 0.95;
     ball.vy *= 0.95;
 
@@ -186,10 +251,23 @@ function resetBall() {
 }
 
 io.on('connection', (socket) => {
+    socket.use(([event, ...args], next) => {
+        const rate = eventRates[event] || [20, 1000];
+        if (!validPacket(event, args) || !checkRateLimit(socket.id, `packet:${event}`, ...rate)) {
+            socket.emit('requestError', { event, message: 'Invalid or excessive request.' });
+            return next(new Error('Rejected event: ' + event));
+        }
+        next();
+    });
+    socket.on('error', () => {});
     
     socket.on('joinGame', (data) => {
+        if (players[socket.id] || Object.keys(players).length >= 60) {
+            socket.emit('requestError', { event: 'joinGame', message: 'World is full or this session already joined.' });
+            return;
+        }
         const spawnPoint = findSafeSpawn();
-        let safeNickname = escapeHTML(data.nickname).substring(0, 15); 
+        let safeNickname = data.nickname.trim().substring(0, 15);
         
         const existingNames = Object.values(players).map(p => p.nickname);
         if (existingNames.includes(safeNickname)) {
@@ -211,7 +289,11 @@ io.on('connection', (socket) => {
             unlockedRooms: new Set() 
         };
 
-        socket.emit('initWorld', { slots: MAP_SLOTS, rooms: getSafeRooms(), players: players, emojis: validEmojis, ball: ball });
+        socket.join('public');
+
+        socket.emit('initWorld', { slots: MAP_SLOTS, rooms: getSafeRooms(),
+            players: Object.fromEntries(Object.entries(players).map(([id, p]) =>
+                [id, { ...p, unlockedRooms: [] }])), emojis: validEmojis, ball: ball });
         const emitPlayer = {...players[socket.id], unlockedRooms: []};
         socket.broadcast.emit('playerJoined', emitPlayer);
     });
@@ -220,14 +302,13 @@ io.on('connection', (socket) => {
         const p = players[socket.id];
         if (!p) return;
         
-        io.emit('playerKicked', socket.id);
-
         const dx = ball.x - (p.x + PLAYER_SIZE/2);
         const dy = ball.y - (p.y + PLAYER_SIZE/2);
         const dist = Math.sqrt(dx*dx + dy*dy);
         const kickRadius = 60; 
 
         if (dist < kickRadius + ball.radius) {
+            io.emit('playerKicked', socket.id);
             const angle = Math.atan2(dy, dx);
             const force = 20.0; 
             ball.vx += Math.cos(angle) * force;
@@ -247,8 +328,12 @@ io.on('connection', (socket) => {
         if (!checkRateLimit(socket.id, 'chat', 2, 1000)) return; 
         const p = players[socket.id];
         if (p) {
-            const safeText = String(text).substring(0, 60); 
-            io.emit('chatMessage', { id: socket.id, text: safeText, roomId: p.roomId });
+            const safeText = text.substring(0, 60);
+            if (p.roomId && (!rooms[p.roomId] || !socket.rooms.has(p.roomId))) return;
+            if (!p.roomId && !socket.rooms.has('public')) return;
+            const channel = p.roomId || 'public';
+            io.to(channel).emit('chatMessage', { id: socket.id, text: safeText,
+                roomId: channel === 'public' ? null : channel });
         }
     });
 
@@ -258,9 +343,10 @@ io.on('connection', (socket) => {
         if (p && p.roomId === data.roomId && rooms[data.roomId]) {
             const room = rooms[data.roomId];
             
+            if (room.musicPlaylist.length >= 20) return;
             room.musicPlaylist.push({
                 videoId: data.videoId,
-                title: escapeHTML(data.title).substring(0, 50),
+                title: data.title.trim().substring(0, 50),
                 addedBy: p.nickname
             });
 
@@ -367,8 +453,9 @@ io.on('connection', (socket) => {
     });
 
     socket.on('screenshare-stop', () => {
-        if (players[socket.id]) {
-            socket.broadcast.emit('screenshare-stopped', players[socket.id].peerId);
+        const p = players[socket.id];
+        if (p?.roomId && socket.rooms.has(p.roomId)) {
+            socket.to(p.roomId).emit('screenshare-stopped', p.peerId);
         }
     });
 
@@ -378,18 +465,45 @@ io.on('connection', (socket) => {
 
     socket.on('sendPeerId', (peerId) => {
         const p = players[socket.id];
-        if (p && !p.peerId) { 
-            p.peerId = String(peerId).substring(0, 50);
+        if (p && !p.peerId && !Object.values(players).some(other => other.peerId === peerId)) {
+            p.peerId = peerId;
             socket.broadcast.emit('updatePlayerPeer', { id: socket.id, peerId: p.peerId });
         }
+    });
+
+    socket.on('media-authorize', (data, respond = () => {}) => {
+        const caller = players[socket.id];
+        const target = Object.values(players).find(player => player.peerId === data.targetPeerId);
+        if (!canShareMedia(caller, target, data.type)) return respond({ allowed: false });
+        const now = Date.now();
+        for (const [token, grant] of mediaGrants)
+            if (grant.expiresAt <= now) mediaGrants.delete(token);
+        if (mediaGrants.size >= 1000) return respond({ allowed: false });
+        const token = crypto.randomBytes(32).toString('hex');
+        mediaGrants.set(token, {
+            callerId: socket.id, targetId: target.id, type: data.type,
+            callerPeerId: caller.peerId, targetPeerId: target.peerId, expiresAt: now + 10000
+        });
+        respond({ allowed: true, token });
+    });
+
+    socket.on('media-verify', (data, respond = () => {}) => {
+        const grant = mediaGrants.get(data.token);
+        mediaGrants.delete(data.token);
+        const caller = grant && players[grant.callerId];
+        const target = players[socket.id];
+        respond({ allowed: !!grant && grant.expiresAt > Date.now() &&
+            grant.targetId === socket.id && grant.callerPeerId === data.callerPeerId &&
+            grant.targetPeerId === target?.peerId && grant.type === data.type &&
+            canShareMedia(caller, target, data.type) });
     });
 
     socket.on('move', (data) => {
         const p = players[socket.id];
         if (!p) return;
 
-        const px = parseFloat(data.x); const py = parseFloat(data.y);
-        const pdx = parseFloat(data.dirX); const pdy = parseFloat(data.dirY);
+        const px = data.x; const py = data.y;
+        const pdx = data.dirX; const pdy = data.dirY;
 
         if (isNaN(px) || isNaN(py) || isNaN(pdx) || isNaN(pdy)) return; 
         const dist = Math.sqrt(Math.pow(px - p.x, 2) + Math.pow(py - p.y, 2));
@@ -427,7 +541,7 @@ io.on('connection', (socket) => {
 
             const doorRect = { x: dStart, y: sy + sH - 10, w: DOOR_SIZE, h: 20 };
             if (rectIntersect(pRect, doorRect)) {
-                if (room.password && !p.unlockedRooms.has(room.id) && room.owner !== socket.id) {
+                if (room.passwordHash && !p.unlockedRooms.has(room.id) && room.owner !== socket.id) {
                     const wasInside = (p.y < sy + sH); const isTryingToEnter = (py < sy + sH);
                     if (!wasInside && isTryingToEnter) { collisionDetected = true; break; }
                 }
@@ -439,31 +553,30 @@ io.on('connection', (socket) => {
             return;
         }
 
-        p.x = px; p.y = py; p.dirX = pdx; p.dirY = pdy;
-
         let calculatedRoomId = null;
         for (const slot of MAP_SLOTS) {
             const sW = slot.w || SLOT_SIZE; const sH = slot.h || SLOT_SIZE;
-            if (p.x > slot.x && p.x < slot.x + sW && p.y > slot.y && p.y < slot.y + sH) {
+            if (px > slot.x && px < slot.x + sW && py > slot.y && py < slot.y + sH) {
                 calculatedRoomId = slot.id; break;
             }
         }
 
-        let isAuthorized = false;
         const room = rooms[calculatedRoomId];
-        if (calculatedRoomId) {
-            if (!room) isAuthorized = true; 
-            else if (room.id === FOOTBALL_FIELD.id) isAuthorized = true; 
-            else if (!room.password) isAuthorized = true; 
-            else if (room.owner === socket.id) isAuthorized = true; 
-            else if (p.unlockedRooms.has(calculatedRoomId)) isAuthorized = true; 
+        if (room && room.passwordHash && room.owner !== socket.id && !p.unlockedRooms.has(calculatedRoomId)) {
+            socket.emit('playerMoved', { id: socket.id, x: p.x, y: p.y, dirX: p.dirX, dirY: p.dirY });
+            return;
         }
+        const previousPeers = Object.values(players)
+            .filter(other => canShareMedia(p, other, 'voice')).map(other => other.id);
+        p.x = px; p.y = py; p.dirX = pdx; p.dirY = pdy;
+        const nextRoomId = room ? calculatedRoomId : null;
 
-        if (calculatedRoomId && isAuthorized) {
-            if (p.roomId !== calculatedRoomId) {
+        if (nextRoomId) {
+            if (p.roomId !== nextRoomId) {
                 if (p.roomId) socket.leave(p.roomId);
-                p.roomId = calculatedRoomId;
-                socket.join(calculatedRoomId); 
+                socket.leave('public');
+                p.roomId = nextRoomId;
+                socket.join(nextRoomId);
                 
                 if (room) {
                     socket.emit('roomSync', { 
@@ -479,7 +592,10 @@ io.on('connection', (socket) => {
             }
         } else {
             if (p.roomId) { socket.leave(p.roomId); p.roomId = null; }
+            socket.join('public');
         }
+
+        revokeMedia(socket, previousPeers.filter(id => !canShareMedia(p, players[id], 'voice')));
 
         checkEmptyRooms();
         socket.broadcast.emit('playerMoved', { id: socket.id, x: p.x, y: p.y, dirX: p.dirX, dirY: p.dirY });
@@ -489,25 +605,36 @@ io.on('connection', (socket) => {
         if (!checkRateLimit(socket.id, 'createRoom', 1, 3000)) return;
         const { slotId, name, password } = data;
         
-        if (slotId === FOOTBALL_FIELD.id) return;
+        const slot = MAP_SLOTS.find(item => item.id === slotId && item.id !== FOOTBALL_FIELD.id);
+        const p = players[socket.id];
+        if (!slot || !p || rooms[slotId] || Object.keys(rooms).length >= MAP_SLOTS.length ||
+            !(p.x > slot.x && p.x < slot.x + slot.w && p.y > slot.y && p.y < slot.y + slot.h)) {
+            socket.emit('requestError', { event: 'createRoom', message: 'Move into an empty plot before creating a room.' });
+            return;
+        }
 
-        const safeName = escapeHTML(name).substring(0, 20);
+        const safeName = name.trim().substring(0, 20);
         
-        if (!rooms[slotId] && players[socket.id]) {
+        if (!rooms[slotId]) {
             rooms[slotId] = { 
                 id: slotId, name: safeName, owner: socket.id, 
-                password: password ? String(password).substring(0,20) : null,
+                ...passwordFields(password),
                 whiteboardHistory: [], notepadText: "",
                 musicPlaylist: [], currentSong: null, songStartTime: 0
             };
-            const safeRoom = { ...rooms[slotId], password: null, hasPassword: !!password, whiteboardHistory: [], notepadText: "", musicPlaylist:[] };
-            players[socket.id].unlockedRooms.add(slotId); 
+            const safeRoom = publicRoom(rooms[slotId]);
+            p.unlockedRooms.add(slotId);
             
-            const slot = MAP_SLOTS.find(s => s.id === slotId);
             if (slot) {
-                const p = players[socket.id];
+                const previousPeers = Object.values(players)
+                    .filter(other => canShareMedia(p, other, 'voice')).map(other => other.id);
                 p.x = slot.x + (slot.w || SLOT_SIZE) / 2 - PLAYER_SIZE / 2;
                 p.y = slot.y + (slot.h || SLOT_SIZE) / 2 - PLAYER_SIZE / 2;
+                if (p.roomId) socket.leave(p.roomId);
+                socket.leave('public');
+                p.roomId = slotId;
+                socket.join(slotId);
+                revokeMedia(socket, previousPeers);
                 io.emit('playerMoved', { id: socket.id, x: p.x, y: p.y, dirX: p.dirX, dirY: p.dirY });
             }
 
@@ -525,7 +652,7 @@ io.on('connection', (socket) => {
         const room = rooms[slotId];
         const p = players[socket.id];
         
-        if (room && p && room.password === String(password)) {
+        if (room && p && passwordMatches(room, password)) {
             p.unlockedRooms.add(slotId); 
             socket.emit('passwordResult', { success: true, slotId: slotId });
         } else {
@@ -534,11 +661,14 @@ io.on('connection', (socket) => {
     });
 
     socket.on('disconnect', () => {
+        for (const [token, grant] of mediaGrants)
+            if (grant.callerId === socket.id || grant.targetId === socket.id) mediaGrants.delete(token);
+        delete rateLimits[socket.id];
         if (players[socket.id]) {
+            revokeMedia(socket, Object.keys(players).filter(id => id !== socket.id));
             io.emit('screenshare-stopped', players[socket.id].peerId); 
             io.emit('camera-stopped', socket.id);
             delete players[socket.id];
-            delete rateLimits[socket.id];
             io.emit('playerLeft', socket.id);
             checkEmptyRooms();
         }
@@ -561,18 +691,7 @@ io.on('connection', (socket) => {
     function checkEmptyRooms() {
         for (const roomId in rooms) {
             if (roomId === FOOTBALL_FIELD.id) continue;
-
-            const slot = MAP_SLOTS.find(s => s.id === roomId);
-            if (!slot) continue;
-            let isOccupied = false;
-            for (const playerId in players) {
-                const p = players[playerId];
-                const sW = slot.w || SLOT_SIZE; const sH = slot.h || SLOT_SIZE;
-                if (p.x > slot.x && p.x < slot.x + sW && p.y > slot.y && p.y < slot.y + sH) {
-                    isOccupied = true; break;
-                }
-            }
-            if (!isOccupied) {
+            if (!Object.values(players).some(player => player.roomId === roomId)) {
                 delete rooms[roomId];
                 io.emit('roomUpdate', { type: 'destroy', slotId: roomId });
             }
@@ -581,10 +700,19 @@ io.on('connection', (socket) => {
 
     function getSafeRooms() {
         const safe = {};
-        for(let key in rooms) { safe[key] = { ...rooms[key], password: null, hasPassword: !!rooms[key].password, whiteboardHistory:[], notepadText:"", musicPlaylist:[] }; }
+        for (const key in rooms) safe[key] = publicRoom(rooms[key]);
         return safe;
     }
 });
 
-const port = process.env.PORT || 3000;
-http.listen(port, () => { console.log(`Sunucu ${port} portunda çalışıyor.`); });
+if (require.main === module) {
+    const port = Number(process.env.PORT || 3000);
+    http.listen(port, () => { console.log(`Server listening on ${http.address().port}.`); });
+}
+
+module.exports = {
+    http, io,
+    getPlayer: id => players[id],
+    roomIds: () => Object.keys(rooms),
+    close: callback => { clearInterval(ballTimer); io.close(callback); }
+};

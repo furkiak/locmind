@@ -1,161 +1,43 @@
-# 🌌 Locmind - Virtual Universe
+# Locmind
 
-![JavaScript](https://img.shields.io/badge/javascript-%23323330.svg?style=for-the-badge&logo=javascript&logoColor=%23F7DF1E)
-![Node.js](https://img.shields.io/badge/node.js-6DA55F?style=for-the-badge&logo=node.js&logoColor=white)
-![Socket.io](https://img.shields.io/badge/Socket.io-black?style=for-the-badge&logo=socket.io&badgeColor=010101)
-![PeerJS](https://img.shields.io/badge/PeerJS-orange?style=for-the-badge&logo=peerjs&logoColor=white)
-![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)
+**A small 2D place for room-scoped conversation and collaboration.** Locmind is a Node.js, Socket.IO and Canvas prototype. People move through a shared map, create an open or password-protected room, and use room chat, notes and a whiteboard. Audio, camera and screen sharing are optional WebRTC features.
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/furkiak/locmind/refs/heads/main/SS.png" width="600" title="ActiveRest Dashboard">
-</p>
+![Diagram of public proximity, room membership and authorized media calls; not a screenshot](docs/room-flow.svg)
 
- 
-[🇬🇧 English](#-english) | [🇹🇷 Türkçe](#-türkçe)
+> **Source preview · 1.1.0-beta.1.** Real Socket.IO packet tests and a browser tour without media passed locally. Two-browser WebRTC calls, mobile input, deployment behind HTTPS, TURN, restart behavior and production moderation are still acceptance work. The diagram is a technical illustration, not a product screenshot.
 
----
+## Try it locally
 
-## 🇬🇧 English
+Use Node.js 24 and npm. From a clean checkout:
 
-**Locmind** is a web-based 2D virtual universe where users can interact with their avatars, chat via real-time voice and video, create private rooms, and collaborate. It runs on HTML5 Canvas and uses WebRTC for peer-to-peer communication.
+```bash
+npm ci
+npm test
+npm start
+```
 
-### 🚀 Key Features
+Open `http://localhost:3000`. Enter a display name and choose **Explore silently** to try the map and chat without microphone/camera permission. Press **Enter** to chat, use **W/A/S/D** or click to move, and press **E** while standing on an empty plot to create a room. Room collaborators can open notes with **H** and whiteboard with **G**. **Q** opens local emoji assets. **Join with audio** requests microphone permission first; camera and screen sharing remain separate controls. If a room has a password, enter it at the door. Do not reuse an important password in this prototype.
 
-* **🕹️ 2D Virtual World:** Smooth movement mechanics using WASD or mouse click on HTML5 Canvas.
-* **🔊 Proximity Voice Chat:** Voice volume changes based on the distance between avatars.
-* **📹 Video Call:** Real-time camera sharing via WebRTC (PeerJS).
-* **🏠 Room System:**
-    * Create private password-protected rooms.
-    * Conference areas and door mechanics.
-* **⚽ Mini-Games:** A football stadium with physics-based ball mechanics and scoring.
-* **🛠️ Collaboration Tools:**
-    * **Shared Whiteboard:** Real-time synchronized drawing board.
-    * **Shared Notepad:** Collaborative text editor with export (.txt) feature.
-    * **Screen Sharing:** Share your screen with other users in the room.
-* **🎵 Music Box:** Watch/Listen to YouTube videos synchronized with everyone in the room.
-* **💤 AFK System:** Users inactive for **30 minutes** are automatically disconnected.
+`npm ci` installs a version-locked dependency tree. The browser gets PeerJS from the local server; PeerJS still uses its default external signaling service for media sessions. Opening Music Box loads the YouTube iframe API. The initial page and Explore silently mode do not request media access. [How data works](public/privacy.html) explains the network and memory behavior.
 
-### 🛠️ Tech Stack
+## What changed in this preview
 
-* **Frontend:** HTML5, CSS3, Vanilla JavaScript, Canvas API
-* **Backend:** Node.js, Express.js
-* **Real-time Comm:** Socket.io
-* **P2P Media:** PeerJS (WebRTC)
+- A private-room chat packet is sent only to sockets the **server** put in that room. Public chat reaches the public channel. Client-side visibility is no longer the privacy boundary.
+- The server validates incoming event shapes, limits packet size/rates, rejects invalid room slots and caps players, rooms and music queue entries. Creating a room requires being on its empty plot. A locked room rejects unauthorized movement even if a client skips its UI.
+- A media offer needs a one-use, ten-second grant bound to the caller, recipient PeerJS IDs and allowed room/proximity state. The receiving client asks the server to verify it before answering. On membership loss, the server asks both honest clients to close related calls. These controls do not erase media a participant already captured.
+- Room passwords are stored as salted scrypt hashes in server memory. The socket response never includes the hash or salt. The application still has no account identity, durable data or moderation system.
+- Emoji files are served from the actual `emoji/` directory. The fake agreement placeholder was removed, and the entry screen offers a no-media tour with a clear data explanation.
 
-### ⚙️ Installation & Setup
+## Network and operational limits
 
-1.  **Clone or Download the Repository**
-    Ensure your folder structure looks like this:
-    ```text
-    /
-    ├── public/
-    │   ├── index.html   (Client code)
-    │   ├── usr1.png     (Avatar image - optional)
-    │   └── ...
-    ├── server.js        (Server code)
-    └── package.json
-    ```
+The default server listens on port 3000. `PORT` changes the port; `ALLOWED_ORIGINS` is a comma-separated list of allowed browser origins and defaults to `http://localhost:3000,http://127.0.0.1:3000`. If you change the port, set the matching origin as well. The server accepts requests without an `Origin` header so CLI clients can connect; protect public deployments with an HTTPS reverse proxy, rate limiting and network policy. Room passwords are a prototype access check, not full user authentication. Reconnecting can reset per-socket rate limits.
 
-2.  **Install Dependencies**
-    Open your terminal in the project directory:
-    ```bash
-    npm init -y
-    npm install express socket.io
-    ```
+Browser microphone and screen capture need a secure context outside localhost. PeerJS uses its public signaling service by default; no TURN server is configured, so some network pairs will fail. The server keeps positions, room content and password hashes in memory only. Restarting loses them. There is no persistence, horizontal scaling, historical recovery or automatic audit log. [Security reporting](SECURITY.md) and [support gates](docs/SUPPORT.md) describe the remaining checks.
 
-3.  **Run the Server**
-    ```bash
-    node server.js
-    ```
+## Development and evidence
 
-4.  **Access the Game**
-    Open your browser and go to: `http://localhost:3000`
+`npm test` uses real local Socket.IO clients to check room isolation, locked movement, invalid payloads, media grant/replay protection and the emoji endpoint; it also syntax-checks the shipped inline script. Tests do **not** establish real WebRTC media interoperability. The repository includes a lockfile, a Linux/Windows CI test workflow, [changelog](CHANGELOG.md), [contribution guide](CONTRIBUTING.md) and [MIT license](LICENSE). The earlier gameplay screenshot [Locmind.png](Locmind.png) shows an older UI; it is not evidence of the current security behavior.
 
-### 🎮 Controls
+## Türkçe
 
-| Key | Action |
-| :--- | :--- |
-| **W, A, S, D** | Move Character |
-| **Enter** | Open Chat / Send Message |
-| **F** | Toggle Microphone (On/Off) |
-| **C** | Toggle Camera (On/Off) |
-| **Q** | Open Emoji Picker |
-| **E** | Interact / Build Room (on empty plots) |
-| **G** | Open Whiteboard (inside a room) |
-| **H** | Open Notepad (inside a room) |
-| **M** | Open Music Box (inside a room) |
-
----
-
-## 🇹🇷 Türkçe
-
-**Locmind**, kullanıcıların avatarlarıyla etkileşime geçebileceği, gerçek zamanlı sesli ve görüntülü sohbet edebileceği, odalar kurup iş birliği yapabileceği web tabanlı 2D bir sanal evrendir. HTML5 Canvas üzerinde çalışır ve iletişim için WebRTC kullanır.
-
-### 🚀 Özellikler
-
-* **🕹️ 2D Sanal Dünya:** Akıcı hareket mekaniğine sahip interaktif dünya.
-* **🔊 Yakınlık Bazlı Ses (Proximity Voice):** Kullanıcılar birbirine yaklaştıkça ses artar, uzaklaştıkça azalır.
-* **📹 Görüntülü Görüşme:** WebRTC (PeerJS) ile düşük gecikmeli kamera paylaşımı.
-* **🏠 Oda Sistemi:**
-    * Şifreli özel odalar oluşturma.
-    * Konferans alanları ve kapı mekaniği.
-* **⚽ Mini Oyunlar:** Fizik tabanlı top mekaniğine sahip futbol stadyumu.
-* **🛠️ İş Birliği Araçları:**
-    * **Ortak Beyaz Tahta:** Eş zamanlı çizim yapılabilen tahta.
-    * **Ortak Not Defteri:** Herkesin düzenleyebileceği metin editörü (.txt çıktı alma özellikli).
-    * **Ekran Paylaşımı:** Ekranınızı odadaki diğer kişilere yansıtın.
-* **🎵 Müzik Kutusu:** YouTube videolarını odadaki herkesle senkronize izleyin.
-* **💤 AFK Sistemi:** **30 dakika** boyunca hareketsiz kalan kullanıcılar sunucudan atılır.
-
-### 🛠️ Teknolojiler
-
-* **Frontend:** HTML5, CSS3, Vanilla JavaScript, Canvas API
-* **Backend:** Node.js, Express.js
-* **Gerçek Zamanlı İletişim:** Socket.io
-* **P2P Medya:** PeerJS (WebRTC)
-
-### ⚙️ Kurulum
-
-1.  **Dosyaları Hazırlayın**
-    Klasör yapınızın şu şekilde olduğundan emin olun:
-    ```text
-    /
-    ├── public/
-    │   ├── index.html   (İstemci kodu)
-    │   ├── usr1.png     (Avatar görseli - opsiyonel)
-    │   └── ...
-    ├── server.js        (Sunucu kodu)
-    └── package.json
-    ```
-
-2.  **Gerekli Paketleri Yükleyin**
-    Terminali proje klasöründe açın ve şu komutları girin:
-    ```bash
-    npm init -y
-    npm install express socket.io
-    ```
-
-3.  **Sunucuyu Başlatın**
-    ```bash
-    node server.js
-    ```
-
-4.  **Oyuna Giriş Yapın**
-    Tarayıcınızdan şu adrese gidin: `http://localhost:3000`
-
-### 🎮 Kontroller
-
-| Tuş | İşlem |
-| :--- | :--- |
-| **W, A, S, D** | Hareket Et |
-| **Enter** | Sohbeti Aç / Mesaj Gönder |
-| **F** | Mikrofonu Aç/Kapa |
-| **C** | Kamerayı Aç/Kapa |
-| **Q** | Emoji Seçiciyi Aç |
-| **E** | Etkileşim / Oda Kur (boş arsadayken) |
-| **G** | Beyaz Tahtayı Aç (oda içindeyken) |
-| **H** | Not Defterini Aç (oda içindeyken) |
-| **M** | Müzik Kutusunu Aç (oda içindeyken) |
-
----
-*Developed with ❤️ using Node.js & Socket.io*
+Locmind, 2B ortak alan, oda sohbeti, not ve beyaz tahta içeren bir kaynak prototipidir. `npm ci`, `npm test`, `npm start` komutlarıyla yerelde çalıştır. **Explore silently** mikrofon/kamera izni istemeden gezinti ve sohbet sağlar. Özel oda mesajları artık yalnızca sunucunun doğruladığı üyelerin Socket.IO odasına gönderilir; medya çağrıları da kısa süreli tek kullanımlık sunucu iznine bağlıdır. Gerçek iki tarayıcılı ses/görüntü ve HTTPS/TURN dağıtım testi bitmeden ürünü güvenli genel servis olarak sunma. Depolama ve gizlilik sınırları için [veri açıklamasını](public/privacy.html) oku.

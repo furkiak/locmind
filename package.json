@@ -1,13 +1,18 @@
 {
-  "name": "sesli-oda-projesi",
-  "version": "1.0.0",
-  "description": "2D Spatial Audio Metaverse",
+  "name": "locmind",
+  "version": "1.1.0-beta.1",
+  "description": "Room-scoped 2D collaboration and proximity chat prototype",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "express": "^4.18.2",
+    "peerjs": "^1.5.5",
     "socket.io": "^4.7.2"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.3"
   }
 }
