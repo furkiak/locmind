@@ -1,6 +1,6 @@
 # Support and release gates
 
-Locmind 1.1.0-beta.1 is a source preview. Local Node.js 24, Windows, the built-in browser's no-media exploration path, and real loopback Socket.IO packets have been exercised. A GitHub Actions workflow is provided but its remote result is not part of this local evidence. Linux CI is configured but not yet observed here.
+Locmind 1.1.0-beta.1 is a source preview. Local Node.js 24, Windows, the built-in browser's no-media exploration path, and real loopback Socket.IO packets have been exercised. The default listener binds `127.0.0.1`; an explicitly configured `BIND_HOST` is required to listen on another interface. A GitHub Actions workflow is provided but its remote result is not part of this local evidence. Linux CI is configured but not yet observed here.
 
 | Area | Current evidence | Remaining gate |
 | --- | --- | --- |

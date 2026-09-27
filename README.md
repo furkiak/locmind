@@ -2,6 +2,10 @@
 
 **A small 2D place for room-scoped conversation and collaboration.** Locmind is a Node.js, Socket.IO and Canvas prototype. People move through a shared map, create an open or password-protected room, and use room chat, notes and a whiteboard. Audio, camera and screen sharing are optional WebRTC features.
 
+![Actual Locmind browser view with one player beside open plots and Explore mode showing media off](docs/images/current-silent-tour-2026-09-28.jpg)
+
+*Local browser capture, 28 September 2026: one player entered with Explore silently; microphone and camera remained off. This shows the current map, not a two-person media or room-authorization test.*
+
 ![Diagram of public proximity, room membership and authorized media calls; not a screenshot](docs/room-flow.svg)
 
 > **Source preview · 1.1.0-beta.1.** Real Socket.IO packet tests and a browser tour without media passed locally. Two-browser WebRTC calls, mobile input, deployment behind HTTPS, TURN, restart behavior and production moderation are still acceptance work. The diagram is a technical illustration, not a product screenshot.
@@ -30,13 +34,13 @@ Open `http://localhost:3000`. Enter a display name and choose **Explore silently
 
 ## Network and operational limits
 
-The default server listens on port 3000. `PORT` changes the port; `ALLOWED_ORIGINS` is a comma-separated list of allowed browser origins and defaults to `http://localhost:3000,http://127.0.0.1:3000`. If you change the port, set the matching origin as well. The server accepts requests without an `Origin` header so CLI clients can connect; protect public deployments with an HTTPS reverse proxy, rate limiting and network policy. Room passwords are a prototype access check, not full user authentication. Reconnecting can reset per-socket rate limits.
+The server binds `127.0.0.1:3000` by default. `PORT` changes the port; `BIND_HOST` changes the listening address. Set a non-loopback bind address only for a deliberately configured deployment behind an HTTPS reverse proxy. `ALLOWED_ORIGINS` is a comma-separated list of allowed browser origins and defaults to `http://localhost:3000,http://127.0.0.1:3000`. If you change the port or public origin, set the matching allowlist as well. The server accepts requests without an `Origin` header so CLI clients can connect; protect public deployments with rate limiting and network policy. Room passwords are a prototype access check, not full user authentication. Reconnecting can reset per-socket rate limits.
 
 Browser microphone and screen capture need a secure context outside localhost. PeerJS uses its public signaling service by default; no TURN server is configured, so some network pairs will fail. The server keeps positions, room content and password hashes in memory only. Restarting loses them. There is no persistence, horizontal scaling, historical recovery or automatic audit log. [Security reporting](SECURITY.md) and [support gates](docs/SUPPORT.md) describe the remaining checks.
 
 ## Development and evidence
 
-`npm test` uses real local Socket.IO clients to check room isolation, locked movement, invalid payloads, media grant/replay protection and the emoji endpoint; it also syntax-checks the shipped inline script. Tests do **not** establish real WebRTC media interoperability. The repository includes a lockfile, a Linux/Windows CI test workflow, [changelog](CHANGELOG.md), [contribution guide](CONTRIBUTING.md) and [MIT license](LICENSE). The earlier gameplay screenshot [Locmind.png](Locmind.png) shows an older UI; it is not evidence of the current security behavior.
+`npm test` uses real local Socket.IO clients to check room isolation, locked movement, invalid payloads, media grant/replay protection and the emoji endpoint; it also syntax-checks the shipped inline script. Tests do **not** establish real WebRTC media interoperability. The repository includes a lockfile, a Linux/Windows CI test workflow, [changelog](CHANGELOG.md), [contribution guide](CONTRIBUTING.md) and [MIT license](LICENSE). The [March 2026 gameplay screenshot](Locmind.png) shows an older UI, including an active-microphone label; it is not evidence of this preview's no-media tour, room authorization or security behavior.
 
 ## Türkçe
 

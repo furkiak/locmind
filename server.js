@@ -707,7 +707,8 @@ io.on('connection', (socket) => {
 
 if (require.main === module) {
     const port = Number(process.env.PORT || 3000);
-    http.listen(port, () => { console.log(`Server listening on ${http.address().port}.`); });
+    const bindHost = process.env.BIND_HOST || '127.0.0.1';
+    http.listen(port, bindHost, () => { console.log(`Server listening on ${http.address().port}.`); });
 }
 
 module.exports = {

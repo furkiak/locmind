@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Bind the development server to localhost by default; allow an explicit `BIND_HOST` for configured deployments.
+- Document the current silent-tour screen with an actual local browser capture and identify the older gameplay image as historical.
+
 ## 1.1.0-beta.1 · source preview
 
 - Route private and public chat through server-verified Socket.IO channels.
