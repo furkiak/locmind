@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>Locmind Admin</title>
+    <meta name="robots" content="noindex">
+    <meta name="theme-color" content="#070a14">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <script src="/js/theme-init.js"></script>
+    <link rel="stylesheet" href="/css/theme.css">
+    <link rel="stylesheet" href="/admin/admin.css">
+    <link rel="modulepreload" href="/admin/chart.js">
+</head>
+<body>
+<div class="backdrop" aria-hidden="true"><i></i><i></i><i></i></div>
+
+<!-- Sign in -->
+<main id="login" class="login" hidden>
+    <form id="loginForm" class="glass login-card" autocomplete="off">
+        <img src="/favicon.svg" alt="" width="56" height="56" class="login-logo">
+        <h1 data-t="title">Locmind Admin</h1>
+        <p class="muted" data-t="loginHint">Paste the admin token printed in the server log or stored in data/secrets.json.</p>
+        <label class="field">
+            <span data-t="token">Admin token</span>
+            <input id="tokenInput" class="input mono" type="password" required minlength="8" maxlength="200" autocomplete="current-password" spellcheck="false">
+        </label>
+        <label class="check"><input id="rememberInput" type="checkbox"> <span data-t="remember">Keep me signed in on this device</span></label>
+        <p id="loginError" class="error" role="alert" hidden></p>
+        <button class="btn btn-primary btn-lg" type="submit" data-t="signIn">Sign in</button>
+        <a class="back" href="/" data-t="backToWorld">Back to the world</a>
+    </form>
+</main>
+
+<!-- Dashboard -->
+<div id="app" class="app" hidden>
+    <aside class="glass sidebar">
+        <div class="brand">
+            <img src="/favicon.svg" alt="" width="30" height="30">
+            <div>
+                <strong id="serverName">Locmind</strong>
+                <span id="serverVersion" class="muted small"></span>
+            </div>
+        </div>
+        <nav class="nav" aria-label="Sections">
+            <button data-view="overview" class="is-active"><i data-icon="home"></i><span data-t="overview">Overview</span></button>
+            <button data-view="players"><i data-icon="users"></i><span data-t="players">Players</span><b id="navPlayers" class="count"></b></button>
+            <button data-view="rooms"><i data-icon="pin"></i><span data-t="rooms">Rooms</span></button>
+            <button data-view="music"><i data-icon="music"></i><span data-t="music">Music</span></button>
+            <button data-view="bans"><i data-icon="lock"></i><span data-t="bans">Bans</span><b id="navBans" class="count"></b></button>
+            <button data-view="settings"><i data-icon="sliders"></i><span data-t="settings">Settings</span></button>
+        </nav>
+        <div class="sidebar-foot">
+            <span class="live"><i></i><span id="liveText" data-t="live">Live</span></span>
+            <button id="themeBtn" class="icon-btn" type="button" aria-label="Appearance"><i data-icon="moon"></i></button>
+            <button id="logoutBtn" class="btn btn-sm" type="button" data-t="signOut">Sign out</button>
+        </div>
+    </aside>
+
+    <main class="content">
+        <!-- Overview -->
+        <section id="view-overview" class="view">
+            <header class="view-head">
+                <div>
+                    <h2 data-t="overview">Overview</h2>
+                    <p class="muted" id="uptimeLine"></p>
+                </div>
+            </header>
+
+            <div class="hero glass">
+                <div>
+                    <span class="label" data-t="playersOnline">Players online</span>
+                    <span id="heroPlayers" class="hero-value">0</span>
+                    <span id="heroSub" class="muted"></span>
+                </div>
+                <form id="announceForm" class="announce">
+                    <label class="sr-only" for="announceInput" data-t="announce">Announcement</label>
+                    <input id="announceInput" class="input" maxlength="280" placeholder="Send an announcement to everyone" data-tp="announcePlaceholder">
+                    <button class="btn btn-primary" type="submit"><i data-icon="send"></i><span data-t="send">Send</span></button>
+                </form>
+            </div>
+
+            <div class="tiles" id="tiles"></div>
+
+            <div class="charts">
+                <article class="glass card"><h3 data-t="chartPlayers">Players online</h3><div id="chartPlayers"></div></article>
+                <article class="glass card"><h3 data-t="chartNetwork">Realtime traffic (KB/s)</h3><div id="chartNetwork"></div></article>
+                <article class="glass card"><h3 data-t="chartCpu">CPU (% of one core)</h3><div id="chartCpu"></div></article>
+                <article class="glass card"><h3 data-t="chartMemory">Memory (RSS, MB)</h3><div id="chartMemory"></div></article>
+                <article class="glass card"><h3 data-t="chartLoop">Event loop delay p99 (ms)</h3><div id="chartLoop"></div></article>
+                <article class="glass card"><h3 data-t="chartTurn">Voice relay (TURN, KB/s)</h3><div id="chartTurn"></div></article>
+            </div>
+
+            <div class="split">
+                <article class="glass card">
+                    <h3 data-t="system">System</h3>
+                    <dl id="systemList" class="kv"></dl>
+                </article>
+                <article class="glass card">
+                    <h3 data-t="relay">Voice relay</h3>
+                    <dl id="turnList" class="kv"></dl>
+                </article>
+            </div>
+            <details class="glass card table-view">
+                <summary data-t="dataTable">Data table (last 5 minutes)</summary>
+                <div class="table-wrap"><table id="historyTable" class="table numeric"></table></div>
+            </details>
+        </section>
+
+        <!-- Players -->
+        <section id="view-players" class="view" hidden>
+            <header class="view-head">
+                <div><h2 data-t="players">Players</h2><p class="muted" id="playersSummary"></p></div>
+                <input id="playerFilter" class="input search" type="search" placeholder="Filter by name, room or IP" data-tp="filterPlayers">
+            </header>
+            <div class="glass card flush"><div class="table-wrap"><table id="playersTable" class="table"></table></div></div>
+        </section>
+
+        <!-- Rooms -->
+        <section id="view-rooms" class="view" hidden>
+            <header class="view-head"><div><h2 data-t="rooms">Rooms</h2><p class="muted" data-t="roomsHint">Permanent rooms survive restarts and stay open when empty.</p></div></header>
+            <form id="roomForm" class="glass card form-grid">
+                <h3 data-t="newPermanent">New permanent room</h3>
+                <label class="field"><span data-t="slot">Plot</span><select id="roomSlot" class="input"></select></label>
+                <label class="field"><span data-t="name">Name</span><input id="roomName" class="input" maxlength="20" required></label>
+                <label class="field"><span data-t="topic">Topic</span><input id="roomTopic" class="input" maxlength="80"></label>
+                <label class="field"><span data-t="password">Password</span><input id="roomPassword" class="input" type="password" maxlength="20" autocomplete="new-password" placeholder="Optional" data-tp="optional"></label>
+                <div class="field"><span data-t="color">Colour</span><div id="roomColors" class="swatches" role="radiogroup"></div></div>
+                <div class="form-actions"><button class="btn btn-primary" type="submit"><i data-icon="plus"></i><span data-t="create">Create</span></button></div>
+            </form>
+            <div class="glass card flush"><div class="table-wrap"><table id="roomsTable" class="table"></table></div></div>
+        </section>
+
+        <!-- Music -->
+        <section id="view-music" class="view" hidden>
+            <header class="view-head"><div><h2 data-t="music">Music</h2><p class="muted" data-t="musicHint">Drop audio files into media/music on the server, or let players upload them.</p></div></header>
+            <article class="glass card">
+                <h3 data-t="uploadQuota">Upload storage</h3>
+                <div class="meter" id="quotaMeter"><i></i></div>
+                <p class="muted small" id="quotaText"></p>
+            </article>
+            <div class="glass card flush"><div class="table-wrap"><table id="musicTable" class="table"></table></div></div>
+        </section>
+
+        <!-- Bans -->
+        <section id="view-bans" class="view" hidden>
+            <header class="view-head"><div><h2 data-t="bans">Bans</h2><p class="muted" data-t="bansHint">Bans apply to the IP address. Ban someone from the Players list.</p></div></header>
+            <div class="glass card flush"><div class="table-wrap"><table id="bansTable" class="table"></table></div></div>
+        </section>
+
+        <!-- Settings -->
+        <section id="view-settings" class="view" hidden>
+            <header class="view-head"><div><h2 data-t="settings">Settings</h2><p class="muted" data-t="settingsHint">Changes apply immediately and are saved in the data folder.</p></div></header>
+            <form id="settingsForm" class="glass card settings">
+                <label class="field"><span data-t="motd">Message of the day</span><textarea id="setMotd" class="input" maxlength="280" rows="2"></textarea><em data-t="motdHint">Shown on the sign-in screen.</em></label>
+                <label class="field"><span data-t="serverPassword">Server password</span><input id="setPassword" class="input" type="password" maxlength="64" autocomplete="new-password"><em id="envPasswordNote" data-t="serverPasswordHint">Leave empty for an open server.</em></label>
+                <div class="row-setting">
+                    <div><strong data-t="uploads">Player uploads</strong><p class="muted small" data-t="uploadsHint">Allow players to add their own audio files to the music library.</p></div>
+                    <label class="switch"><input id="setUploads" type="checkbox"><i></i></label>
+                </div>
+                <label class="field"><span data-t="wordFilter">Word filter</span><textarea id="setFilter" class="input" rows="4" maxlength="2000" placeholder="One word per line or comma separated" data-tp="wordFilterPlaceholder"></textarea><em data-t="wordFilterHint">Matching words are masked in chat.</em></label>
+                <div class="form-actions"><button class="btn btn-primary" type="submit" data-t="save">Save</button></div>
+            </form>
+        </section>
+    </main>
+</div>
+
+<!-- Action sheet used for ban / mute choices -->
+<dialog id="sheet" class="glass sheet">
+    <form method="dialog" id="sheetForm">
+        <h3 id="sheetTitle"></h3>
+        <p id="sheetText" class="muted"></p>
+        <div id="sheetBody"></div>
+        <div class="sheet-actions">
+            <button class="btn" value="cancel" data-t="cancel">Cancel</button>
+            <button class="btn btn-danger" id="sheetOk" value="ok">OK</button>
+        </div>
+    </form>
+</dialog>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<script src="/shared/world.js"></script>
+<script type="module" src="/admin/admin.js"></script>
+</body>
+</html>
