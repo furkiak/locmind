@@ -18,6 +18,8 @@ const RTC_TYPES = new Set(['offer', 'answer', 'candidate', 'close']);
  */
 function createGame(io, { world, youtube, config, emojiFiles = [], limiter = new RateLimiter() }) {
     const dirty = new Set();
+    const resumes = new Map();          // token -> state of a player that just dropped (for seamless reconnects)
+    const RESUME_TTL_MS = 90 * 1000;
 
     const posOf = p => ({ id: p.id, x: round(p.x), y: round(p.y), dirX: round(p.dirX, 2), dirY: round(p.dirY, 2) });
     const roomOf = p => (p.roomId ? world.rooms.get(p.roomId) : null);
@@ -85,9 +87,41 @@ function createGame(io, { world, youtube, config, emojiFiles = [], limiter = new
             }
         }
         limiter.sweep();
+        for (const [token, saved] of resumes) if (saved.expires < t) resumes.delete(token);
     }, 30000);
 
-    for (const timer of [moveTimer, ballTimer, afkTimer]) timer.unref();
+    const roomTimer = setInterval(() => announceDestroyed(world.sweepRooms()), 5000);
+
+    for (const timer of [moveTimer, ballTimer, afkTimer, roomTimer]) timer.unref();
+
+    /** Removes a player and tells everybody; remembers their state so a reconnect can pick it up. */
+    function dropPlayer(id) {
+        limiter.forget(id);
+        const { player, destroyed } = world.removePlayer(id, { grace: true });
+        dirty.delete(id);
+        if (!player) return null;
+        resumes.set(player.token, { token: player.token, x: player.x, y: player.y, unlocked: new Set(player.unlocked), expires: world.now() + RESUME_TTL_MS });
+        io.emit('player:leave', id);
+        announceDestroyed(destroyed);
+        return player;
+    }
+
+    function takeResume(token) {
+        if (typeof token !== 'string' || token.length > 64) return null;
+        // The old connection may still look alive for a while after a network drop: take it over.
+        for (const p of Array.from(world.players.values())) {
+            if (p.token === token) {
+                const sock = io.sockets.sockets.get(p.id);
+                dropPlayer(p.id);
+                if (sock) sock.disconnect(true);
+                break;
+            }
+        }
+        const saved = resumes.get(token);
+        if (!saved) return null;
+        resumes.delete(token);
+        return saved.expires >= world.now() ? saved : null;
+    }
 
     io.on('connection', socket => {
         // Flood guard: a well behaved client never gets near this.
@@ -125,12 +159,16 @@ function createGame(io, { world, youtube, config, emojiFiles = [], limiter = new
                 if (!p) {
                     if (world.players.size >= config.MAX_PLAYERS) return reply({ ok: false, error: 'full' });
                     if (!limiter.allow(socket.id, 'join', 3, 10000)) return reply({ ok: false, error: 'rate-limit' });
-                    p = world.addPlayer(socket.id, isPlainObject(payload) ? payload : {});
+                    const data = isPlainObject(payload) ? payload : {};
+                    p = world.addPlayer(socket.id, data, takeResume(data.resume));
+                    if (p.roomId) enterRoom(p, p.roomId);
                     socket.broadcast.emit('player:join', world.publicPlayer(p));
                 }
                 reply({
                     ok: true,
                     you: p.id,
+                    token: p.token,
+                    unlocked: world.unlockedSlots(p),
                     slots: world.slots,
                     rooms: world.publicRooms(),
                     players: world.publicPlayers(),
@@ -283,24 +321,23 @@ function createGame(io, { world, youtube, config, emojiFiles = [], limiter = new
             if (d.to === p.id || !world.players.has(d.to)) return;
             if (typeof d.type !== 'string' || !RTC_TYPES.has(d.type)) return;
             if (d.type !== 'close' && !isPlainObject(d.data)) return;
-            io.to(d.to).emit('rtc:signal', { from: p.id, channel: d.channel, type: d.type, data: d.type === 'close' ? null : d.data });
+            const lid = typeof d.lid === 'string' ? d.lid.slice(0, 24) : undefined;
+            io.to(d.to).emit('rtc:signal', { from: p.id, channel: d.channel, type: d.type, lid, data: d.type === 'close' ? null : d.data });
         });
 
-        on('camera:stop', { limit: [5, 2000] }, p => { socket.broadcast.emit('camera:stopped', p.id); });
-        on('screen:stop', { limit: [5, 2000] }, p => { socket.broadcast.emit('screen:stopped', p.id); });
-
-        socket.on('disconnect', () => {
-            limiter.forget(socket.id);
-            const { player, destroyed } = world.removePlayer(socket.id);
-            dirty.delete(socket.id);
-            if (!player) return;
-            io.emit('player:leave', socket.id);
-            announceDestroyed(destroyed);
+        // Everyone sees who is muted / on camera / sharing a screen.
+        on('status', { limit: [12, 2000] }, (p, d) => {
+            if (!isPlainObject(d)) return;
+            p.muted = !!d.muted; p.cam = !!d.cam; p.screen = !!d.screen;
+            p.lastActive = world.now();
+            socket.broadcast.emit('player:status', { id: p.id, muted: p.muted, cam: p.cam, screen: p.screen });
         });
+
+        socket.on('disconnect', () => { dropPlayer(socket.id); });
     });
 
     return {
-        stop() { for (const t of [moveTimer, ballTimer, afkTimer]) clearInterval(t); }
+        stop() { for (const t of [moveTimer, ballTimer, afkTimer, roomTimer]) clearInterval(t); }
     };
 }
 

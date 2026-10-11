@@ -69,7 +69,7 @@ test('protocol end to end', async t => {
         assert.equal(a.me.ok, true);
         assert.equal(a.me.slots.length, 21);
         assert.ok(a.me.emojis.images.length >= 4, 'emoji files are served from public/emoji');
-        assert.ok(!JSON.stringify(a.me).includes('unlocked'));
+        assert.ok(!JSON.stringify(a.me).includes('password'), 'no secrets in the world snapshot');
         const b = await join(ctx, 'Bob'); socks.push(b);
         const [pj] = await a.waitFor('player:join', p => p.nickname === 'Bob');
         assert.equal(pj.id, b.id);
@@ -115,6 +115,19 @@ test('protocol end to end', async t => {
         await sleep(100);
         assert.ok(!b.events.some(e => e[0] === 'rtc:signal'));
         assert.ok(!a.events.some(e => e[0] === 'rtc:signal'), 'no echo to self');
+    });
+
+    await t.test('status flags are broadcast and shown to late joiners', async () => {
+        const [a, b] = socks;
+        b.events.length = 0;
+        a.emit('status', { muted: true, cam: true, screen: false });
+        const [st] = await b.waitFor('player:status', x => x.id === a.id);
+        assert.deepEqual([st.muted, st.cam, st.screen], [true, true, false]);
+        const late = await join(ctx, 'Late'); socks.push(late);
+        const seen = late.me.players.find(p => p.id === a.id);
+        assert.equal(seen.muted, true);
+        late.close(); socks.pop();
+        a.emit('status', { muted: false, cam: false, screen: false });
     });
 
     await t.test('movement is batched and illegal jumps are snapped back', async () => {
@@ -264,6 +277,43 @@ test('protocol end to end', async t => {
         await a.waitFor('player:leave', id => id === bid);
         assert.ok(!ctx.world.players.has(bid));
     });
+});
+
+test('reconnect resumes the previous session (position, unlocks) and replaces a lingering connection', async t => {
+    const ctx = await boot();
+    const socks = [];
+    t.after(async () => { socks.forEach(s => s.close()); await ctx.close(); });
+
+    const owner = await join(ctx, 'Owner'); socks.push(owner);
+    const guest = await join(ctx, 'Guest'); socks.push(guest);
+    const slot = ctx.world.slots[7];
+    const c = slotCenter(slot);
+    const po = ctx.world.players.get(owner.id);
+    po.x = slot.x - 80; po.y = slot.y + 100;
+    await walkTo(ctx, owner, c.x, c.y);
+    assert.equal((await owner.call('room:create', { slotId: slot.id, name: 'Vault', password: 'pw' })).ok, true);
+    assert.equal((await guest.call('room:password', { slotId: slot.id, password: 'pw' })).ok, true);
+
+    // the guest's connection dies (the server still believes it is alive) and a new one resumes
+    const token = guest.me.token;
+    assert.ok(token);
+    const gp = ctx.world.players.get(guest.id);
+    const before = { x: gp.x, y: gp.y };
+    const back = await client(ctx); socks.push(back);
+    const res = await back.call('join', { nickname: 'Guest', resume: token });
+    assert.equal(res.ok, true);
+    assert.deepEqual(res.unlocked, [slot.id], 'unlock survived the reconnect');
+    const me = res.players.find(p => p.id === back.id);
+    assert.equal(me.nickname, 'Guest', 'no #1234 suffix: the stale session was taken over');
+    assert.equal(me.x, before.x);
+    assert.equal(ctx.world.players.size, 2, 'old and new session are not both online');
+    assert.ok(!ctx.world.players.has(guest.id));
+
+    // a stolen / unknown token gets a fresh spawn
+    const stranger = await client(ctx); socks.push(stranger);
+    const res2 = await stranger.call('join', { nickname: 'Eve', resume: 'deadbeef' });
+    assert.equal(res2.ok, true);
+    assert.deepEqual(res2.unlocked, []);
 });
 
 test('http endpoints and headers', async t => {

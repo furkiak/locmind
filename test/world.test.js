@@ -217,3 +217,92 @@ test('YouTube link parsing', () => {
     assert.equal(parseVideoId('https://evil.example/watch?v=dQw4w9WgXcQ'), null);
     assert.equal(parseVideoId(undefined), null);
 });
+
+test('an unlock belongs to one room instance: a rebuilt room on the same plot asks for the password again', () => {
+    const world = new World();
+    const slot = world.slots[3];
+    const c = slotCenterTopLeft(slot);
+    const doorX = W.doorStart(slot) + C.DOOR_SIZE / 2 - C.PLAYER_SIZE / 2;
+
+    const first = world.addPlayer('o1', { nickname: 'One' });
+    place(world, first, c.x, c.y);
+    assert.ok(world.createRoom(first, { slotId: slot.id, name: 'Old', password: 'old' }).ok);
+    const guest = world.addPlayer('g', { nickname: 'Guest' });
+    assert.ok(world.checkPassword(guest, slot.id, 'old'));
+    assert.deepEqual(world.unlockedSlots(guest), [slot.id]);
+
+    // everybody leaves -> room is destroyed
+    place(world, first, doorX, slot.y + slot.h + 40);
+    first.slotId = slot.id; world.occupancy.get(slot.id).add(first.id);
+    const out = world.tryMove(first, doorX, slot.y + slot.h + 45, 0, 1);
+    assert.ok(out.destroyed.includes(slot.id));
+
+    const second = world.addPlayer('o2', { nickname: 'Two' });
+    place(world, second, c.x, c.y);
+    assert.ok(world.createRoom(second, { slotId: slot.id, name: 'New', password: 'new' }).ok);
+    assert.deepEqual(world.unlockedSlots(guest), [], 'old unlock does not carry over');
+
+    place(world, guest, doorX, slot.y + slot.h + 2);
+    guest.budget = 320;
+    assert.equal(world.tryMove(guest, doorX, slot.y + slot.h - 30, 0, -1).ok, false, 'door is locked for the old guest');
+});
+
+test('resuming a session restores position, unlocks and ownership; locked rooms re-evict', () => {
+    const world = new World();
+    const slot = world.slots[4];
+    const c = slotCenterTopLeft(slot);
+    const owner = world.addPlayer('o', { nickname: 'Owner' });
+    place(world, owner, c.x, c.y);
+    assert.ok(world.createRoom(owner, { slotId: slot.id, name: 'Mine', password: 'pw' }).ok);
+
+    const saved = { token: owner.token, x: owner.x, y: owner.y, unlocked: new Set(owner.unlocked) };
+    const room = world.rooms.get(slot.id);
+    world.removePlayer('o');   // note: the room is destroyed because nobody is inside
+    assert.ok(!world.rooms.has(slot.id));
+
+    const back = world.addPlayer('o-new', { nickname: 'Owner' }, saved);
+    assert.equal(back.token, saved.token);
+    assert.equal(back.x, saved.x);
+    assert.equal(back.roomId, null, 'the room is gone, so the player is just standing on an empty plot');
+    assert.equal(back.slotId, slot.id);
+    assert.ok(room, 'sanity');
+
+    // resumed into a plot that was meanwhile rebuilt as a locked room by someone else
+    const other = world.addPlayer('x', { nickname: 'Other' });
+    place(world, other, c.x, c.y + 40);
+    const w2 = new World();
+    const builder = w2.addPlayer('b', { nickname: 'B' });
+    place(w2, builder, c.x, c.y);
+    assert.ok(w2.createRoom(builder, { slotId: slot.id, name: 'Theirs', password: 'zz' }).ok);
+    const evicted = w2.addPlayer('r', { nickname: 'R' }, { token: 'tok', x: c.x, y: c.y, unlocked: new Set() });
+    assert.ok(evicted.y > slot.y + slot.h, 'pushed out in front of the door');
+    assert.equal(evicted.roomId, null);
+});
+
+test('a room whose last occupant lost their connection survives a grace period', () => {
+    let t = 1000;
+    const world = new World(() => t);
+    const slot = world.slots[2];
+    const c = slotCenterTopLeft(slot);
+    const owner = world.addPlayer('o', { nickname: 'Owner' });
+    place(world, owner, c.x, c.y);
+    assert.ok(world.createRoom(owner, { slotId: slot.id, name: 'Keep' }).ok);
+
+    const saved = { token: owner.token, x: owner.x, y: owner.y, unlocked: new Set(owner.unlocked) };
+    const res = world.removePlayer('o', { grace: true });
+    assert.deepEqual(res.destroyed, []);
+    assert.ok(world.rooms.has(slot.id), 'still there right after the drop');
+    assert.deepEqual(world.sweepRooms(), []);
+
+    t += 30000;
+    const back = world.addPlayer('o2', { nickname: 'Owner' }, saved);
+    assert.equal(back.roomId, slot.id, 'reconnecting owner lands back inside the room');
+    assert.equal(world.rooms.get(slot.id).owner, 'o2', 'ownership moved to the new socket');
+    t += 120000;
+    assert.deepEqual(world.sweepRooms(), [], 'occupied rooms never expire');
+
+    world.removePlayer('o2', { grace: true });
+    t += 61000;
+    assert.deepEqual(world.sweepRooms(), [slot.id], 'expires once the grace period is over');
+    assert.ok(!world.rooms.has(slot.id));
+});

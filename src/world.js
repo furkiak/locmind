@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('crypto');
 const { EventEmitter } = require('events');
 const W = require('../shared/world');
 const { cleanText, hashPassword, verifyPassword } = require('./security');
@@ -12,6 +13,7 @@ const PS = C.PLAYER_SIZE;
 const MOVE_BUDGET_RATE = C.SPEED * 1.8;  // px / s a player may "earn"
 const MOVE_BUDGET_CAP = 320;             // burst allowance (network jitter, tab lag)
 const MAX_ROOMS_PER_OWNER = 2;
+const ROOM_GRACE_MS = 60 * 1000;   // a room whose last occupant *dropped* survives this long (reconnects)
 const MAX_WB_BATCHES = 600;
 
 class World extends EventEmitter {
@@ -27,9 +29,10 @@ class World extends EventEmitter {
         this.rooms.set(STADIUM.id, this._newRoom({ id: STADIUM.id, name: 'Football Arena', owner: null, builtin: true, type: 'stadium', color: 'green' }));
     }
 
-    _newRoom({ id, name, owner, color, passwordRecord = null, builtin = false, type = 'conference' }) {
+    _newRoom({ id, name, owner, ownerToken = null, color, passwordRecord = null, builtin = false, type = 'conference' }) {
         return {
-            id, name, owner, color, type, builtin,
+            id, name, owner, ownerToken, color, type, builtin,
+            uid: crypto.randomBytes(8).toString('hex'),   // distinguishes two rooms that reuse the same plot
             password: passwordRecord,
             whiteboard: [],          // batches: { c, w, s: [[x0,y0,x1,y1], ...] }
             note: { text: '', rev: 0 },
@@ -39,7 +42,10 @@ class World extends EventEmitter {
 
     // ---------------------------------------------------------------- players
 
-    addPlayer(id, { nickname, avatar }) {
+    /**
+     * @param {object} [resume] state of a previous session of the same player (see takeResume in game.js)
+     */
+    addPlayer(id, { nickname, avatar }, resume = null) {
         let name = cleanText(nickname, 15) || 'Guest';
         const taken = new Set(Array.from(this.players.values(), p => p.nickname.toLowerCase()));
         if (taken.has(name.toLowerCase())) {
@@ -47,18 +53,47 @@ class World extends EventEmitter {
             do { candidate = `${name}#${Math.floor(1000 + Math.random() * 9000)}`; } while (taken.has(candidate.toLowerCase()));
             name = candidate;
         }
-        const spawn = this._spawnPoint();
+        const spawn = resume ? { x: resume.x, y: resume.y } : this._spawnPoint();
         const t = this.now();
         const player = {
             id, nickname: name,
             avatar: W.AVATARS.includes(avatar) ? avatar : W.AVATARS[0],
             x: spawn.x, y: spawn.y, dirX: 0, dirY: 1,
             slotId: null, roomId: null,
-            unlocked: new Set(),
+            muted: false, cam: false, screen: false,
+            token: resume ? resume.token : crypto.randomBytes(16).toString('hex'),
+            unlocked: new Set(resume ? resume.unlocked : []),
             budget: MOVE_BUDGET_CAP, lastMoveAt: t, lastActive: t
         };
         this.players.set(id, player);
+        if (resume) {
+            for (const room of this.rooms.values()) if (room.ownerToken === player.token) room.owner = id;
+            this._enterWorldAt(player);
+        }
         return player;
+    }
+
+    /** Puts a (resumed) player into the occupancy/membership books and evicts them from rooms they may not enter. */
+    _enterWorldAt(p) {
+        const slot = W.slotAt(this.slots, p.x + PS / 2, p.y + PS / 2);
+        const room = slot ? this.rooms.get(slot.id) : null;
+        if (room && !this._canEnter(p, room)) {
+            // the plot was re-built as a locked room while the player was away
+            p.x = W.doorStart(slot) + C.DOOR_SIZE / 2 - PS / 2;
+            p.y = slot.y + slot.h + 24;
+            return this._enterWorldAt(p);
+        }
+        p.slotId = slot ? slot.id : null;
+        if (slot) this.occupancy.get(slot.id).add(p.id);
+        if (room) room.expiresAt = null;
+        p.roomId = room ? room.id : null;
+    }
+
+    /** Slot ids of the rooms (still alive) this player has unlocked. */
+    unlockedSlots(p) {
+        const out = [];
+        for (const room of this.rooms.values()) if (p.unlocked.has(room.uid)) out.push(room.id);
+        return out;
     }
 
     _spawnPoint() {
@@ -76,22 +111,43 @@ class World extends EventEmitter {
     }
 
     publicPlayer(p) {
-        return { id: p.id, nickname: p.nickname, avatar: p.avatar, x: p.x, y: p.y, dirX: p.dirX, dirY: p.dirY };
+        return { id: p.id, nickname: p.nickname, avatar: p.avatar, x: p.x, y: p.y, dirX: p.dirX, dirY: p.dirY, muted: p.muted, cam: p.cam, screen: p.screen };
     }
 
     publicPlayers() { return Array.from(this.players.values(), p => this.publicPlayer(p)); }
 
-    /** Removes a player; returns the ids of rooms that vanished because they became empty. */
-    removePlayer(id) {
+    /**
+     * Removes a player; returns the ids of rooms that vanished because they became empty.
+     * With `grace` (connection lost, not walked away) an emptied room lingers for a while so the
+     * player can reconnect into it.
+     */
+    removePlayer(id, { grace = false } = {}) {
         const p = this.players.get(id);
         if (!p) return { player: null, destroyed: [] };
         this.players.delete(id);
         const destroyed = [];
         if (p.slotId) {
             this.occupancy.get(p.slotId).delete(id);
-            this._collect(p.slotId, destroyed);
+            if (grace) this._hold(p.slotId); else this._collect(p.slotId, destroyed);
         }
         return { player: p, destroyed };
+    }
+
+    _hold(slotId) {
+        const room = this.rooms.get(slotId);
+        if (room && !room.builtin && this.occupancy.get(slotId).size === 0) room.expiresAt = this.now() + ROOM_GRACE_MS;
+        else if (room && room.builtin) this._collect(slotId, []);
+    }
+
+    /** Destroys rooms whose grace period ran out. Returns their ids. */
+    sweepRooms() {
+        const t = this.now(), gone = [];
+        for (const room of Array.from(this.rooms.values())) {
+            if (!room.expiresAt) continue;
+            if (this.occupancy.get(room.id).size > 0) { room.expiresAt = null; continue; }
+            if (room.expiresAt <= t) { this.rooms.delete(room.id); gone.push(room.id); }
+        }
+        return gone;
     }
 
     // ------------------------------------------------------------------ rooms
@@ -109,7 +165,7 @@ class World extends EventEmitter {
     publicRooms() { return Array.from(this.rooms.values(), r => this.publicRoom(r)); }
 
     _canEnter(p, room) {
-        return !room.password || room.owner === p.id || p.unlocked.has(room.id);
+        return !room.password || room.owner === p.id || p.unlocked.has(room.uid);
     }
 
     /** Destroys a conference room whose slot became empty. */
@@ -138,12 +194,12 @@ class World extends EventEmitter {
 
         const pass = typeof password === 'string' ? password.slice(0, 20) : '';
         const room = this._newRoom({
-            id: slotId, name: roomName, owner: p.id,
+            id: slotId, name: roomName, owner: p.id, ownerToken: p.token,
             color: Object.prototype.hasOwnProperty.call(W.ROOM_COLORS, color) ? color : 'blue',
             passwordRecord: pass ? hashPassword(pass) : null
         });
         this.rooms.set(slotId, room);
-        p.unlocked.add(slotId);
+        p.unlocked.add(room.uid);
 
         // The owner appears in the middle of the new room.
         const moved = [p];
@@ -179,7 +235,7 @@ class World extends EventEmitter {
         const room = this.rooms.get(slotId);
         if (!room || !room.password || typeof password !== 'string') return false;
         if (!verifyPassword(password, room.password)) return false;
-        p.unlocked.add(slotId);
+        p.unlocked.add(room.uid);
         return true;
     }
 
@@ -238,6 +294,7 @@ class World extends EventEmitter {
             if (prevSlot) this._collect(prevSlot, result.destroyed);
         }
         const room = slotId ? this.rooms.get(slotId) : null;
+        if (room) room.expiresAt = null;
         const roomId = room && this._canEnter(p, room) ? room.id : null;
         if (roomId !== p.roomId) {
             result.membership = { from: p.roomId, to: roomId };
