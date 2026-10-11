@@ -1,9 +1,11 @@
 // Canvas renderer: world, rooms, stadium, players, effects and the minimap.
 import { S, W, C, bus, me, redraw, roomIdOf } from './state.js';
 import { isSpeaking, anySpeaking } from './audio.js';
-import { step } from './movement.js';
+import { step, input } from './movement.js';
+import { typingNow } from './social.js';
 import { t } from './i18n.js';
 import { clamp } from './dom.js';
+import { parseAvatar, paintEmojiAvatar, STATUS_COLORS } from './avatar.js';
 
 const PS = C.PLAYER_SIZE;
 const FONT = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", Roboto, sans-serif';
@@ -34,7 +36,7 @@ const AURORA = [[500, 500, 900, '10,132,255'], [2400, 520, 1000, '48,209,88'], [
 let palKey = '', pal = PALETTES.dark;
 function palette() {
     const key = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
-    if (key !== palKey) { palKey = key; pal = PALETTES[key]; sprites.clear(); dotPattern = null; stadiumCache = null; redraw(); }
+    if (key !== palKey) { palKey = key; pal = PALETTES[key]; sprites.clear(); dotPattern = null; stadiumCache = null; auditoriumCache = null; redraw(); }
     return pal;
 }
 
@@ -76,17 +78,22 @@ function pill(cx, cy, text, { font = `600 12px ${FONT}`, bg, fg, padX = 9, h = 2
 
 const avatarImgs = {};
 const sprites = new Map();
-function avatarSprite(name, nick) {
+function avatarSprite(name) {
     const k = name + '|' + palKey;
     let s = sprites.get(k);
     if (s) return s;
-    const img = avatarImgs[name];
-    if (!img || !img.complete || !img.naturalWidth) return null;
+    const info = parseAvatar(name);
     const size = 96, c = document.createElement('canvas');
     c.width = c.height = size;
     const g = c.getContext('2d');
-    g.beginPath(); g.arc(size / 2, size / 2, size / 2 - 3, 0, Math.PI * 2); g.closePath();
-    g.save(); g.clip(); g.drawImage(img, 3, 3, size - 6, size - 6); g.restore();
+    if (info.kind === 'emoji') paintEmojiAvatar(g, info, size, FONT);
+    else {
+        const img = avatarImgs[info.src.slice(1)];
+        if (!img || !img.complete || !img.naturalWidth) return null;
+        g.beginPath(); g.arc(size / 2, size / 2, size / 2 - 3, 0, Math.PI * 2); g.closePath();
+        g.save(); g.clip(); g.drawImage(img, 3, 3, size - 6, size - 6); g.restore();
+    }
+    if (sprites.size > 300) sprites.clear();
     g.beginPath(); g.arc(size / 2, size / 2, size / 2 - 2, 0, Math.PI * 2);
     g.lineWidth = 3; g.strokeStyle = palKey === 'light' ? 'rgba(255,255,255,.95)' : 'rgba(255,255,255,.55)'; g.stroke();
     sprites.set(k, c);
@@ -169,6 +176,51 @@ function stadiumSprite() {
     return c;
 }
 
+// ----------------------------------------------------------- auditorium
+
+let auditoriumCache = null;
+function auditoriumSprite() {
+    const key = S.settings.lang + palKey;
+    if (auditoriumCache && auditoriumCache.key === key) return auditoriumCache.canvas;
+    const a = W.AUDITORIUM, st = a.stage, pad = 70;
+    const c = document.createElement('canvas');
+    c.width = a.w + pad * 2; c.height = a.h + pad * 2;
+    const g = c.getContext('2d');
+    g.translate(pad - a.x, pad - a.y);
+    const rrect = (x, y, w, h, r) => { g.beginPath(); g.roundRect ? g.roundRect(x, y, w, h, r) : g.rect(x, y, w, h); };
+    const light = palKey === 'light';
+
+    // hall floor
+    rrect(a.x, a.y, a.w, a.h, 36);
+    const floor = g.createLinearGradient(0, a.y, 0, a.y + a.h);
+    floor.addColorStop(0, light ? '#ece6fb' : '#1b1638'); floor.addColorStop(1, light ? '#f6f3fd' : '#120f26');
+    g.fillStyle = floor; g.fill();
+    g.lineWidth = 3; g.strokeStyle = light ? 'rgba(175,82,222,.45)' : 'rgba(191,90,242,.5)'; g.stroke();
+
+    // stage with a warm spotlight
+    const spot = g.createRadialGradient(st.x + st.w / 2, st.y, 10, st.x + st.w / 2, st.y + st.h / 2, st.w * .75);
+    spot.addColorStop(0, 'rgba(255,214,10,.35)'); spot.addColorStop(1, 'rgba(255,214,10,0)');
+    g.fillStyle = spot; g.fillRect(st.x - st.w * .4, st.y - 40, st.w * 1.8, st.h + 160);
+    rrect(st.x, st.y, st.w, st.h, 22);
+    const sg = g.createLinearGradient(0, st.y, 0, st.y + st.h);
+    sg.addColorStop(0, light ? '#d9c8f7' : '#3b2a6e'); sg.addColorStop(1, light ? '#c4aef0' : '#2a1e52');
+    g.fillStyle = sg; g.fill();
+    g.lineWidth = 3; g.strokeStyle = 'rgba(255,214,10,.75)'; g.stroke();
+    g.fillStyle = light ? 'rgba(60,30,110,.55)' : 'rgba(255,255,255,.55)'; g.font = `800 22px ${FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(t('stage').toUpperCase(), st.x + st.w / 2, st.y + st.h - 26);
+
+    // rows of seats facing the stage
+    g.fillStyle = light ? 'rgba(120,90,190,.18)' : 'rgba(191,90,242,.16)';
+    for (let row = 0; row < 7; row++) {
+        const y = st.y + st.h + 90 + row * 80;
+        if (y > a.y + a.h - 60) break;
+        const span = 340 + row * 60, n = Math.floor(span / 56);
+        for (let i = 0; i < n; i++) { rrect(a.x + a.w / 2 - span / 2 + i * 56 + 6, y, 44, 26, 9); g.fill(); }
+    }
+    auditoriumCache = { canvas: c, pad, key };
+    return c;
+}
+
 // -------------------------------------------------------------- scene
 
 function view() {
@@ -202,6 +254,14 @@ function drawSlot(slot, now) {
         ctx.drawImage(sp, x - stadiumCache.pad, y - stadiumCache.pad);
         return;
     }
+    if (slot.type === 'auditorium') {
+        const sp = auditoriumSprite();
+        ctx.drawImage(sp, x - auditoriumCache.pad, y - auditoriumCache.pad);
+        let count = 0;
+        for (const id in S.players) if (roomIdOf(S.players[id]) === slot.id) count++;
+        pill(x + w / 2, y - 24, t('auditorium') + (count ? `  · ${count}` : ''), { font: `650 14px ${FONT}`, bg: pal.label, fg: pal.labelText, padX: 13, h: 28, dot: W.ROOM_COLORS.purple });
+        return;
+    }
     if (!room) {
         const here = S.currentSlotId === slot.id;
         rr(x, y, w, h, 20); ctx.fillStyle = here ? pal.slotHere : pal.slot; ctx.fill();
@@ -231,6 +291,14 @@ function drawSlot(slot, now) {
     for (const id in S.players) if (roomIdOf(S.players[id]) === room.id) count++;
     const label = (room.hasPassword ? '🔒 ' : '') + room.name;
     pill(x + w / 2, y - 24, label + (count ? `  · ${count}` : ''), { font: `650 14px ${FONT}`, bg: pal.label, fg: pal.labelText, padX: 13, h: 28, dot: locked ? W.ROOM_COLORS.red : col });
+    if (room.topic && S.zoom > .55) {
+        ctx.save(); ctx.globalAlpha = .8;
+        ctx.font = `500 12px ${FONT}`; ctx.fillStyle = pal.labelText; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        let topic = room.topic;
+        while (topic.length > 4 && textWidth(topic, ctx.font) > w - 24) topic = topic.slice(0, -2);
+        ctx.fillText(topic === room.topic ? topic : topic + '…', x + w / 2, y + 22);
+        ctx.restore();
+    }
 }
 
 function drawBall(now) {
@@ -286,8 +354,11 @@ function drawPlayer(p, now) {
     }
 
     const sprite = avatarSprite(p.avatar);
+    if (p.status === 'away') ctx.globalAlpha = .6;
     if (sprite) ctx.drawImage(sprite, cx - PS / 2 - 2, cy - PS / 2 - 2, PS + 4, PS + 4);
     else { ctx.fillStyle = W.ROOM_COLORS.indigo; ctx.beginPath(); ctx.arc(cx, cy, PS / 2, 0, Math.PI * 2); ctx.fill(); }
+    ctx.globalAlpha = 1;
+    if (S.follow === p.id) { ctx.save(); ctx.setLineDash([4, 5]); ctx.strokeStyle = W.ROOM_COLORS.teal; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, PS / 2 + 7, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
     if (isMe) { ctx.strokeStyle = W.ROOM_COLORS.blue; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(cx, cy, PS / 2 + 3, 0, Math.PI * 2); ctx.stroke(); }
 
     // facing marker
@@ -300,7 +371,20 @@ function drawPlayer(p, now) {
         ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(bx - 3, by + 3); ctx.lineTo(bx + 3, by - 3); ctx.stroke();
     }
 
-    pill(cx, cy + PS / 2 + 14, p.nickname, { bg: pal.name, fg: pal.nameText, h: 19, padX: 8 });
+    pill(cx, cy + PS / 2 + 14, p.nickname, { bg: pal.name, fg: pal.nameText, h: 19, padX: 8, dot: p.status && p.status !== 'available' ? STATUS_COLORS[p.status] : null });
+
+    // raised hand (rooms and the auditorium), with the queue position
+    const hand = S.room.hands.findIndex(x => x.id === p.id);
+    if (hand >= 0 && roomIdOf(p) === S.currentRoomId) {
+        const hx = cx - PS / 2 + 1, hy = cy - PS / 2 + 1, bob = Math.sin(now / 300) * 1.5;
+        ctx.save();
+        ctx.fillStyle = '#FFD60A'; ctx.shadowColor = 'rgba(0,0,0,.35)'; ctx.shadowBlur = 6;
+        ctx.beginPath(); ctx.arc(hx, hy + bob, 11, 0, Math.PI * 2); ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.font = `14px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('✋', hx, hy + bob + 1);
+        ctx.fillStyle = '#1c1c1e'; ctx.font = `800 10px ${FONT}`; ctx.fillText(String(hand + 1), hx + 10, hy + bob - 9);
+        ctx.restore();
+    }
 
     // everything above the head stacks upwards
     let top = cy - PS / 2 - 12;
@@ -331,6 +415,17 @@ function drawPlayer(p, now) {
             top -= 52;
         }
     }
+    if (!p.bubble && typingNow(p)) {
+        const bw = 44, bh = 24, by = top - bh - 6;
+        ctx.save();
+        rr(cx - bw / 2, by, bw, bh, 12); ctx.fillStyle = pal.bubble; ctx.fill();
+        for (let i = 0; i < 3; i++) {
+            const k = (Math.sin(now / 160 - i * .9) + 1) / 2;
+            ctx.globalAlpha = .35 + k * .65;
+            ctx.fillStyle = pal.bubbleText; ctx.beginPath(); ctx.arc(cx - 10 + i * 10, by + bh / 2 - k * 2, 3, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.restore();
+    }
     if (p.bubble) {
         const left = p.bubble.until - now;
         if (left <= 0) p.bubble = null;
@@ -348,6 +443,22 @@ function drawPlayer(p, now) {
             ctx.restore();
         }
     }
+}
+
+function drawRoute(now) {
+    const self = me();
+    if (!self || !input.target) return;
+    const pts = [input.target, ...(input.path || [])];
+    ctx.save();
+    ctx.setLineDash([2, 10]); ctx.lineDashOffset = -now / 40; ctx.lineCap = 'round';
+    ctx.strokeStyle = palKey === 'light' ? 'rgba(0,122,255,.55)' : 'rgba(100,210,255,.6)'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(self.rx + PS / 2, self.ry + PS / 2);
+    for (const q of pts) ctx.lineTo(q.x + PS / 2, q.y + PS / 2);
+    ctx.stroke();
+    const end = pts[pts.length - 1];
+    ctx.setLineDash([]); ctx.fillStyle = ctx.strokeStyle;
+    ctx.beginPath(); ctx.arc(end.x + PS / 2, end.y + PS / 2, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
 }
 
 function drawFx(now) {
@@ -425,6 +536,7 @@ function drawMinimap() {
         const room = S.rooms[s.id];
         rrm(ox + s.x * sc, oy + s.y * sc, s.w * sc, s.h * sc, 3);
         if (s.type === 'stadium') mctx.fillStyle = 'rgba(48,209,88,.55)';
+        else if (s.type === 'auditorium') mctx.fillStyle = 'rgba(191,90,242,.5)';
         else if (room) mctx.fillStyle = (W.ROOM_COLORS[room.color] || '#0A84FF') + 'cc';
         else mctx.fillStyle = palKey === 'light' ? 'rgba(40,60,110,.16)' : 'rgba(255,255,255,.14)';
         mctx.fill();
@@ -453,7 +565,7 @@ function update(dt, now) {
             else if (Math.abs(dx) > .15 || Math.abs(dy) > .15) { const k = 1 - Math.exp(-dt * 16); p.rx += dx * k; p.ry += dy * k; animating = true; }
             else { p.rx = p.x; p.ry = p.y; }
         }
-        if (p.emoji || p.bubble || p.kickAnim) animating = true;
+        if (p.emoji || p.bubble || p.kickAnim || (p.typing && p.typing > now)) animating = true;
         if (p.cam && p.hasVideo) animating = true;
     }
     if (S.ball) {
@@ -470,7 +582,7 @@ function update(dt, now) {
             if (Math.abs(tx - S.cam.x) > .2 || Math.abs(ty - S.cam.y) > .2) animating = true;
         }
     }
-    if (S.fx.length || S.locate || S.currentSlotId) animating = true;
+    if (S.fx.length || S.locate || S.currentSlotId || S.room.hands.length || (input.path && input.path.length)) animating = true;
     if (anySpeaking(now)) animating = true;
 }
 
@@ -486,6 +598,7 @@ function draw(now) {
     for (const slot of S.slots) if (visible(v, slot.x, slot.y, slot.w, slot.h, 90)) drawSlot(slot, now);
     if (S.ball && visible(v, S.ball.rx, S.ball.ry, 1, 1)) drawBall(now);
     drawLocate(now);
+    if (input.path && input.path.length) drawRoute(now);
     const list = Object.values(S.players).filter(p => visible(v, p.rx, p.ry, PS, PS, 160)).sort((a, b) => a.ry - b.ry);
     for (const p of list) drawPlayer(p, now);
     drawFx(now);
@@ -506,7 +619,7 @@ function resize() {
 export function startRender() {
     resize();
     window.addEventListener('resize', resize);
-    bus.on('setting', ({ key }) => { if (key === 'lang') stadiumCache = null; redraw(); });
+    bus.on('setting', ({ key }) => { if (key === 'lang') { stadiumCache = null; auditoriumCache = null; } redraw(); });
     let last = performance.now();
     const frame = now => {
         const dt = Math.min((now - last) / 1000, .1);

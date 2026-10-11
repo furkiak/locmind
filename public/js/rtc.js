@@ -2,7 +2,7 @@
 //   audio  : both ways, created for everybody in earshot
 //   camera : one way (owner -> viewers in earshot)
 //   screen : one way (owner -> everybody in the same room)
-import { S, C, bus, roomIdOf } from './state.js';
+import { S, bus, roomIdOf, voiceRelation } from './state.js';
 import { attachVoice, detachVoice, sendStream } from './audio.js';
 import { play } from './sfx.js';
 
@@ -21,7 +21,7 @@ class Link {
     constructor(id, channel, initiator, lid) {
         this.id = id; this.channel = channel; this.initiator = initiator; this.lid = lid;
         this.closed = false; this.haveRemote = false; this.pendingIce = []; this.timer = null;
-        this.pc = new RTCPeerConnection({ iceServers: S.config.iceServers, bundlePolicy: 'max-bundle' });
+        this.pc = new RTCPeerConnection({ iceServers: S.config.iceServers || [], bundlePolicy: 'max-bundle', iceTransportPolicy: S.forceRelay ? 'relay' : 'all' });
         this.pc.onicecandidate = e => { if (e.candidate) signal(id, channel, 'candidate', this.lid, e.candidate.toJSON()); };
         this.pc.ontrack = e => this.onTrack(e);
         this.pc.onconnectionstatechange = () => this.onState();
@@ -132,9 +132,7 @@ export async function handleSignal({ from, channel, type, lid, data }) {
 }
 
 export function wantsVoice(me, p, linked) {
-    const myRoom = S.currentRoomId, theirRoom = roomIdOf(p);
-    if (myRoom || theirRoom) return myRoom === theirRoom;
-    return Math.hypot(me.x - p.x, me.y - p.y) < (linked ? C.HEAR_LINK_DISTANCE : C.HEAR_DISTANCE);
+    return voiceRelation(me, p, linked).link;
 }
 
 function canRetry(k) {
@@ -184,6 +182,28 @@ export function closeChannel(channel, initiatorOnly = true) {
 export function closeAllLinks() {
     for (const l of Array.from(links.values())) l.close(false);
     failedAt.clear();
+}
+
+/** Connection details for diagnostics: which candidate types each link really uses. */
+export async function linkStats() {
+    const out = [];
+    for (const l of links.values()) {
+        const row = { id: l.id, channel: l.channel, state: l.pc.connectionState, local: null, remote: null, rtt: null };
+        try {
+            const stats = await l.pc.getStats();
+            let pair = null;
+            stats.forEach(s => { if (s.type === 'transport' && s.selectedCandidatePairId) pair = stats.get(s.selectedCandidatePairId); });
+            if (!pair) stats.forEach(s => { if (s.type === 'candidate-pair' && s.nominated && s.state === 'succeeded') pair = s; });
+            if (pair) {
+                const lc = stats.get(pair.localCandidateId), rc = stats.get(pair.remoteCandidateId);
+                row.local = lc && lc.candidateType; row.remote = rc && rc.candidateType;
+                row.rtt = pair.currentRoundTripTime ? Math.round(pair.currentRoundTripTime * 1000) : null;
+                row.protocol = lc && (lc.relayProtocol || lc.protocol);
+            }
+        } catch (_) { /* closed meanwhile */ }
+        out.push(row);
+    }
+    return out;
 }
 
 export const linkedIds = () => {

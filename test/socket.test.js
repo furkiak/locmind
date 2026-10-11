@@ -1,63 +1,11 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { io: connect } = require('socket.io-client');
-const { createApp } = require('../src/app');
 const W = require('../shared/world');
+const { bootApp, client, join, walkTo, sleep, slotCenter } = require('./helpers');
 
 const { C } = W;
-
-async function boot() {
-    const fakeFetch = async url => ({
-        ok: true,
-        json: async () => ({ title: `Title of ${String(url).slice(-11)}` })
-    });
-    const ctx = createApp({ fetchImpl: fakeFetch });
-    await new Promise(r => ctx.server.listen(0, '127.0.0.1', r));
-    ctx.url = `http://127.0.0.1:${ctx.server.address().port}`;
-    return ctx;
-}
-
-function client(ctx) {
-    const s = connect(ctx.url, { transports: ['websocket'], forceNew: true, reconnection: false });
-    s.events = [];
-    s.onAny((name, ...args) => s.events.push([name, ...args]));
-    s.waitFor = (name, pred = () => true, timeout = 2000) => new Promise((resolve, reject) => {
-        const hit = s.events.find(e => e[0] === name && pred(...e.slice(1)));
-        if (hit) return resolve(hit.slice(1));
-        const timer = setTimeout(() => reject(new Error(`timeout waiting for ${name}`)), timeout);
-        const handler = (...args) => { if (pred(...args)) { clearTimeout(timer); s.off(name, handler); resolve(args); } };
-        s.on(name, handler);
-    });
-    s.call = (event, payload) => new Promise(resolve => s.emit(event, payload, resolve));
-    return new Promise(resolve => s.on('connect', () => resolve(s)));
-}
-
-async function join(ctx, nickname) {
-    const s = await client(ctx);
-    const res = await s.call('join', { nickname, avatar: 'usr1.png' });
-    s.me = res;
-    return s;
-}
-
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-
-/** Walks the server-side player to a point in small legal steps (like a real client). */
-async function walkTo(ctx, sock, tx, ty) {
-    const p = ctx.world.players.get(sock.id);
-    while (Math.hypot(tx - p.x, ty - p.y) > 1) {
-        const d = Math.hypot(tx - p.x, ty - p.y), step = Math.min(10, d);
-        const nx = p.x + (tx - p.x) / d * step, ny = p.y + (ty - p.y) / d * step;
-        const before = { x: p.x, y: p.y };
-        sock.emit('move', { x: nx, y: ny, dirX: 1, dirY: 0 });
-        await sleep(25);
-        if (p.x === before.x && p.y === before.y) throw new Error(`blocked at ${p.x},${p.y} -> ${tx},${ty}`);
-    }
-}
-
-function slotCenter(slot) {
-    return { x: slot.x + slot.w / 2 - C.PLAYER_SIZE / 2, y: slot.y + slot.h / 2 - C.PLAYER_SIZE / 2 };
-}
+const boot = bootApp;
 
 test('protocol end to end', async t => {
     const ctx = await boot();
@@ -67,8 +15,9 @@ test('protocol end to end', async t => {
     await t.test('join returns the world and announces the player', async () => {
         const a = await join(ctx, 'Alice'); socks.push(a);
         assert.equal(a.me.ok, true);
-        assert.equal(a.me.slots.length, 21);
+        assert.equal(a.me.slots.length, 22);
         assert.ok(a.me.emojis.images.length >= 4, 'emoji files are served from public/emoji');
+        assert.ok(Array.isArray(a.me.iceServers), 'ICE servers come with the join answer');
         assert.ok(!JSON.stringify(a.me).includes('password'), 'no secrets in the world snapshot');
         const b = await join(ctx, 'Bob'); socks.push(b);
         const [pj] = await a.waitFor('player:join', p => p.nickname === 'Bob');
@@ -115,6 +64,22 @@ test('protocol end to end', async t => {
         await sleep(100);
         assert.ok(!b.events.some(e => e[0] === 'rtc:signal'));
         assert.ok(!a.events.some(e => e[0] === 'rtc:signal'), 'no echo to self');
+
+        // only the fields a browser needs are relayed
+        a.emit('rtc:signal', { to: b.id, channel: 'audio', type: 'candidate', data: { candidate: 'candidate:1 1 udp 1 1.2.3.4 5 typ host', sdpMid: '0', sdpMLineIndex: 0, junk: 'x'.repeat(5000) } });
+        const [cand] = await b.waitFor('rtc:signal', s => s.type === 'candidate');
+        assert.deepEqual(Object.keys(cand.data).sort(), ['candidate', 'sdpMLineIndex', 'sdpMid']);
+
+        // nobody can push signals at a player on the other side of the map
+        const pa = ctx.world.players.get(a.id), pb = ctx.world.players.get(b.id);
+        const saved = { x: pb.x, y: pb.y };
+        pb.x = 3000; pb.y = 2800;
+        b.events.length = 0;
+        a.emit('rtc:signal', { to: b.id, channel: 'audio', type: 'offer', data: { sdp: 'v=0', type: 'offer' } });
+        await sleep(100);
+        assert.ok(!b.events.some(e => e[0] === 'rtc:signal'), 'far away players are out of reach');
+        pb.x = saved.x; pb.y = saved.y;
+        assert.ok(Math.hypot(pa.x - pb.x, pa.y - pb.y) < 1000);
     });
 
     await t.test('status flags are broadcast and shown to late joiners', async () => {
@@ -134,8 +99,10 @@ test('protocol end to end', async t => {
         const [a, b] = socks;
         const p = ctx.world.players.get(a.id);
         a.emit('move', { x: p.x + 8, y: p.y + 2, dirX: 1, dirY: 0 });
-        const [batch] = await b.waitFor('players:move', rows => rows.some(r => r[0] === a.id));
-        assert.ok(Array.isArray(batch));
+        const [batch] = await b.waitFor('players:move', rows => rows.some(r => r[0] === p.n));
+        const mine = batch.find(r => r[0] === p.n);
+        // compact row: [short id, integer x, integer y, direction 0..63]
+        assert.deepEqual(mine, [p.n, Math.round(p.x), Math.round(p.y), 32]);
         a.events.length = 0;
         a.emit('move', { x: 3000, y: 3000, dirX: 1, dirY: 0 });
         const [snap] = await a.waitFor('player:snap');
@@ -265,7 +232,7 @@ test('protocol end to end', async t => {
         await sleep(200);
         const chats = a.events.filter(e => e[0] === 'chat');
         assert.ok(chats.length >= 1 && chats.length <= 4, `got ${chats.length}`);
-        assert.ok(chats[0][1].text.length <= 80);
+        assert.ok(chats[0][1].text.length <= 160);
     });
 
     await t.test('disconnect cleans up', async () => {
@@ -316,6 +283,21 @@ test('reconnect resumes the previous session (position, unlocks) and replaces a 
     assert.deepEqual(res2.unlocked, []);
 });
 
+test('built-in TURN: join answer carries per-player, verifiable credentials', async t => {
+    const relay = 52000 + Math.floor(Math.random() * 5000);
+    const ctx = await boot({ TURN: true, TURN_PORT: 0, TURN_PUBLIC_IP: '127.0.0.1', TURN_RELAY_MIN: relay, TURN_RELAY_MAX: relay + 20 });
+    const a = await join(ctx, 'Relay');
+    t.after(async () => { a.close(); await ctx.close(); });
+    const ice = a.me.iceServers;
+    assert.equal(ice.length, 1);
+    assert.ok(ice[0].urls.some(u => u.startsWith('turn:127.0.0.1:') && u.endsWith('transport=udp')));
+    assert.ok(ice[0].urls.some(u => u.startsWith('stun:')));
+    assert.match(ice[0].username, new RegExp(`^\\d+:${a.id}$`));
+    assert.equal(ice[0].credential, ctx.turn.passwordFor(ice[0].username));
+    const cfg = await (await fetch(ctx.url + '/api/config')).json();
+    assert.equal(cfg.turn.port, ctx.turn.port);
+});
+
 test('http endpoints and headers', async t => {
     const ctx = await boot();
     t.after(() => ctx.close());
@@ -325,7 +307,7 @@ test('http endpoints and headers', async t => {
     assert.equal(health.ok, true);
 
     const cfg = await (await get('/api/config')).json();
-    assert.ok(Array.isArray(cfg.iceServers) && cfg.iceServers.length > 0);
+    assert.equal(typeof cfg.name, 'string');
 
     const index = await get('/');
     assert.equal(index.status, 200);
@@ -337,4 +319,13 @@ test('http endpoints and headers', async t => {
     assert.equal((await get('/emoji/1.png')).status, 200);
     assert.equal((await get('/api/yt/search?q=a')).status, 400);
     assert.equal((await get('/../server.js')).status, 404);
+    assert.equal((await get('/%2e%2e/server.js')).status, 404);
+    assert.equal((await get('/js/%00main.js')).status, 404);
+    const js = await fetch(ctx.url + '/js/main.js', { headers: { 'accept-encoding': 'br' } });
+    assert.equal(js.headers.get('content-encoding'), 'br');
+    const etag = js.headers.get('etag');
+    assert.equal((await fetch(ctx.url + '/js/main.js', { headers: { 'if-none-match': etag } })).status, 304);
+    const part = await fetch(ctx.url + '/usr1.png', { headers: { range: 'bytes=0-9' } });
+    assert.equal(part.status, 206);
+    assert.equal((await part.arrayBuffer()).byteLength, 10);
 });

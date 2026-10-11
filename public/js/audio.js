@@ -1,9 +1,9 @@
 // Web Audio graph: microphone -> send stream, remote voices -> (gain, stereo pan) -> master.
-import { S, C, bus, roomIdOf } from './state.js';
+import { S, bus, voiceRelation, isBlocked } from './state.js';
 import { clamp } from './dom.js';
 import { initSfx } from './sfx.js';
 
-let ctx = null, master = null, sendDest = null, micGain = null;
+let ctx = null, master = null, sendDest = null, micGain = null, visibilityHooked = false;
 let micStream = null, micSource = null, micAnalyser = null, micBuf = null;
 const voices = new Map();           // player id -> voice nodes
 const speakingUntil = new Map();    // player id -> timestamp
@@ -35,12 +35,15 @@ export function initAudio() {
 
     initSfx(ctx, master);
     if (ctx.state === 'suspended') ctx.resume().catch(() => {});
-    document.addEventListener('visibilitychange', () => { if (ctx.state === 'suspended') ctx.resume().catch(() => {}); });
+    if (!visibilityHooked) {
+        visibilityHooked = true;
+        document.addEventListener('visibilitychange', () => { if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {}); });
+    }
     return ctx;
 }
 
 export function setMasterVolume(pct) {
-    if (master) master.gain.setTargetAtTime(clamp(pct, 0, 150) / 100, ctx.currentTime, .02);
+    if (master && ctx) master.gain.setTargetAtTime(clamp(pct, 0, 150) / 100, ctx.currentTime, .02);
 }
 
 // --------------------------------------------------------------- microphone
@@ -78,10 +81,26 @@ export async function startMic() {
     }
 }
 
+/** The microphone is live when it is on, not muted and (with push-to-talk) the talk key is held. */
+export const micOpen = () => S.micState === 'on' && !S.muted && (!S.settings.ptt || S.pttDown);
+
 function applyMute() {
-    if (!micGain) return;
-    const open = S.micState === 'on' && !S.muted;
-    micGain.gain.setTargetAtTime(open ? 1 : 0, ctx.currentTime, .015);
+    if (!micGain || !ctx) return;
+    micGain.gain.setTargetAtTime(micOpen() ? 1 : 0, ctx.currentTime, .015);
+}
+
+export function setPushToTalk(down) {
+    if (S.pttDown === down) return;
+    S.pttDown = down;
+    applyMute();
+    bus.emit('mic-state');
+}
+bus.on('setting', ({ key }) => { if (key === 'ptt') { S.pttDown = false; applyMute(); bus.emit('mic-state'); } });
+
+/** Current microphone level 0..1 (for the dock meter). */
+export function micLevel() {
+    if (!micAnalyser || !micOpen()) return 0;
+    return Math.min(1, level(micAnalyser, micBuf) * 2.2);
 }
 
 export async function toggleMute() {
@@ -143,14 +162,9 @@ export function updateSpatial(self) {
     for (const [id, v] of voices) {
         const p = S.players[id];
         let vol = 0, pan = 0;
-        if (p) {
-            const theirRoom = roomIdOf(p), dx = p.x - self.x, dy = p.y - self.y, dist = Math.hypot(dx, dy);
-            if (S.currentRoomId || theirRoom) {
-                if (S.currentRoomId === theirRoom) { vol = 1; pan = clamp(dx / 700, -1, 1) * .5; }
-            } else if (dist < C.HEAR_DISTANCE) {
-                vol = Math.pow(1 - dist / C.HEAR_DISTANCE, 1.4);
-                pan = clamp(dx / (C.HEAR_DISTANCE * .7), -1, 1) * .9;
-            }
+        if (p && !isBlocked(id)) {
+            const rel = voiceRelation(self, p, true);
+            vol = rel.gain; pan = clamp(rel.pan, -1, 1) * .9;
         }
         v.gain.gain.setTargetAtTime(vol * userVolume(id), t, .06);
         if (v.panner) v.panner.pan.setTargetAtTime(S.settings.spatial ? pan : 0, t, .08);
@@ -167,7 +181,7 @@ function level(analyser, buf) {
 }
 
 export function updateSpeaking(now) {
-    if (micAnalyser && S.micState === 'on' && !S.muted && level(micAnalyser, micBuf) > SPEAK_THRESHOLD) speakingUntil.set(S.myId, now + SPEAK_HOLD_MS);
+    if (micAnalyser && micOpen() && level(micAnalyser, micBuf) > SPEAK_THRESHOLD) speakingUntil.set(S.myId, now + SPEAK_HOLD_MS);
     for (const [id, v] of voices) {
         if (level(v.analyser, v.buf) > SPEAK_THRESHOLD && v.gain.gain.value > .02) speakingUntil.set(id, now + SPEAK_HOLD_MS);
     }
@@ -183,5 +197,5 @@ export function shutdownAudio() {
     for (const id of Array.from(voices.keys())) detachVoice(id);
     stopMicNodes();
     if (ctx) ctx.close().catch(() => {});
-    ctx = null;
+    ctx = null; master = null; sendDest = null; micGain = null;
 }

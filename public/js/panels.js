@@ -1,5 +1,5 @@
 // Side panels: people in earshot, rooms directory, emoji picker and chat.
-import { S, W, bus, me, redraw, roomIdOf } from './state.js';
+import { S, W, bus, me, redraw, roomIdOf, isBlocked } from './state.js';
 import { t } from './i18n.js';
 import { h, byId, clear, setRangeFill } from './dom.js';
 import { icon } from './icons.js';
@@ -7,7 +7,11 @@ import { send } from './net.js';
 import { isSpeaking } from './audio.js';
 import { wantsVoice } from './rtc.js';
 import { play } from './sfx.js';
-import { setUnread, getUnread, updateDock } from './ui.js';
+import { setUnread, getUnread, updateDock, toast } from './ui.js';
+import { avatarEl } from './avatar.js';
+import { walkTo } from './movement.js';
+import { destinationFor } from './path.js';
+import { notify } from './social.js';
 
 const TINTS = ['#0A84FF', '#BF5AF2', '#FF375F', '#FF9F0A', '#30D158', '#64D2FF', '#5E5CE6'];
 const tintOf = name => { let n = 0; for (const ch of name) n = (n * 31 + ch.codePointAt(0)) >>> 0; return TINTS[n % TINTS.length]; };
@@ -21,7 +25,7 @@ export function updatePeople(force = false) {
     const self = me(), panel = byId('people');
     if (!self) return;
     const list = Object.values(S.players).filter(p => p.id !== S.myId && wantsVoice(self, p, true)).sort((a, b) => a.nickname.localeCompare(b.nickname));
-    const key = list.map(p => `${p.id}:${p.muted ? 1 : 0}`).join(',') + '|' + S.currentRoomId + '|' + S.settings.lang;
+    const key = list.map(p => `${p.id}:${p.muted ? 1 : 0}:${p.avatar}:${p.status}`).join(',') + '|' + self.avatar + self.status + '|' + S.currentRoomId + '|' + S.settings.lang;
     if (list.length === 0) { panel.hidden = true; peopleKey = ''; personEls.clear(); return; }
     panel.hidden = false;
     if (force || key !== peopleKey) {
@@ -31,16 +35,18 @@ export function updatePeople(force = false) {
         const room = S.currentRoomId ? S.rooms[S.currentRoomId] : null;
         panel.appendChild(h('h4', {}, `${t(room ? 'people_room' : 'people_nearby')} · ${list.length + 1}`));
         panel.appendChild(h('div', { class: 'person' },
-            h('img', { src: '/' + self.avatar, alt: '' }),
+            avatarEl(self.avatar, { size: 30, status: self.status }),
             h('div', { class: 'name' }, self.nickname, h('small', {}, t('you')))));
         for (const p of list) {
             const vol = h('input', { class: 'range vol', type: 'range', min: 0, max: 3, step: .1, value: S.userVolumes[p.id] === undefined ? 1 : S.userVolumes[p.id], 'aria-label': p.nickname });
             setRangeFill(vol);
             vol.max = '3'; vol.style.setProperty('--fill-pct', `${(vol.value / 3) * 100}%`);
             vol.addEventListener('input', () => { S.userVolumes[p.id] = parseFloat(vol.value); vol.style.setProperty('--fill-pct', `${(vol.value / 3) * 100}%`); });
-            const row = h('div', { class: 'person' },
-                h('img', { src: '/' + p.avatar, alt: '' }),
-                h('div', { class: 'name' }, p.nickname),
+            const who = h('button', { type: 'button', class: 'who', title: p.nickname, onClick: () => bus.emit('player-click', p.id) },
+                avatarEl(p.avatar, { size: 30, status: p.status }),
+                h('div', { class: 'name' }, p.nickname, p.statusText ? h('small', {}, p.statusText) : null));
+            const row = h('div', { class: 'person' + (isBlocked(p.id) ? ' is-blocked' : '') },
+                who,
                 p.muted ? h('span', { class: 'mute', html: icon('mic-off') }) : null,
                 vol);
             personEls.set(p.id, row);
@@ -68,14 +74,19 @@ function renderRooms() {
     const count = id => Object.values(S.players).filter(p => roomIdOf(p) === id).length;
     for (const r of Object.values(S.rooms).sort((a, b) => (b.builtin - a.builtin) || a.name.localeCompare(b.name))) {
         const col = W.ROOM_COLORS[r.color] || W.ROOM_COLORS.blue;
-        const meta = r.builtin ? t('rooms_builtin') : [r.ownerName ? t('rooms_by', { name: r.ownerName }) : null, t('rooms_inside', { n: count(r.id) })].filter(Boolean).join(' · ');
-        const name = r.builtin ? t('stadium') : r.name;
-        const btn = h('button', { class: 'room-row', type: 'button', title: t('rooms_locate') },
+        const n = count(r.id);
+        const meta = [r.builtin ? t('rooms_builtin') : r.permanent ? t('rooms_permanent') : r.ownerName ? t('rooms_by', { name: r.ownerName }) : null, n ? t('rooms_inside', { n }) : null].filter(Boolean).join(' · ');
+        const name = r.builtin ? (r.type === 'stadium' ? t('stadium') : t('auditorium')) : r.name;
+        const row = h('div', { class: 'room-row' + (r.id === S.currentRoomId ? ' is-here' : '') },
             h('span', { class: 'swatch', style: { color: col, background: col } }),
-            h('span', { class: 'meta' }, h('b', {}, (r.hasPassword ? '🔒 ' : '') + name), h('small', {}, meta)),
-            h('span', { class: 'go', html: icon('pin') }));
-        btn.addEventListener('click', () => { S.locate = { slotId: r.id, until: performance.now() + 12000 }; toggleRooms(false); redraw(); });
-        rows.push(btn);
+            h('span', { class: 'meta' }, h('b', {}, (r.hasPassword ? '🔒 ' : '') + name), h('small', {}, meta), r.topic ? h('em', {}, r.topic) : null),
+            h('button', { type: 'button', class: 'icon-btn', title: t('rooms_locate'), 'aria-label': t('rooms_locate'), html: icon('pin'), onClick: () => { S.locate = { slotId: r.id, until: performance.now() + 12000 }; toggleRooms(false); redraw(); } }),
+            h('button', { type: 'button', class: 'icon-btn go', title: t('rooms_go'), 'aria-label': t('rooms_go'), html: icon('walk'), onClick: () => {
+                const d = destinationFor(r.id);
+                if (d && walkTo(d.x, d.y)) { S.locate = { slotId: r.id, until: performance.now() + 8000 }; toggleRooms(false); }
+                else toast(t('no_path'), { type: 'warn' });
+            } }));
+        rows.push(row);
     }
     panel.appendChild(h('h4', {}, t('rooms_title')));
     rows.forEach(r => panel.appendChild(r));
@@ -153,15 +164,40 @@ export function toggleChatLog(force) {
 }
 const scrollLog = () => { const l = byId('chat-list'); l.scrollTop = l.scrollHeight; };
 
-function addLogLine(msg) {
+const seen = new Set();
+const msgKey = m => `${m.t}|${m.id}|${m.text}`;
+
+function pushLine(li) {
     const list = byId('chat-list');
-    const li = h('li', {}, h('b', { style: { color: tintOf(msg.name) } }, msg.name), msg.text);
-    if (msg.roomId) li.appendChild(h('span', { class: 'scope' }, t('scope_room')));
     list.appendChild(li);
     history.push(li);
-    while (history.length > 120) history.shift().remove();
+    while (history.length > 160) history.shift().remove();
     scrollLog();
 }
+
+function mentionsMe(text) {
+    const self = me();
+    return !!self && new RegExp(`(^|[^\\p{L}\\p{N}_])@${self.nickname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}_])`, 'iu').test(text);
+}
+
+/** Adds a chat line; returns false when it was already shown (history replays) or is hidden. */
+function addLogLine(msg) {
+    const k = msgKey(msg);
+    if (seen.has(k)) return false;
+    seen.add(k);
+    if (seen.size > 2000) seen.clear();
+    if (isBlocked(msg.id)) return false;
+    const li = h('li', {}, h('b', { style: { color: tintOf(msg.name) } }, msg.name), msg.text);
+    if (msg.roomId) li.appendChild(h('span', { class: 'scope' }, t('scope_room')));
+    if (msg.t) li.title = new Date(msg.t).toLocaleTimeString();
+    if (msg.id !== S.myId && mentionsMe(msg.text)) li.classList.add('mention');
+    pushLine(li);
+    return true;
+}
+
+bus.on('chat:history', list => list.forEach(addLogLine));
+bus.on('room:sync', snap => (snap.chat || []).forEach(addLogLine));
+bus.on('chat:system', text => pushLine(h('li', { class: 'sys' }, text)));
 
 export function initChat() {
     byId('chatbar').addEventListener('submit', e => {
@@ -177,12 +213,17 @@ export function initChat() {
 }
 
 bus.on('chat', msg => {
+    if (isBlocked(msg.id)) return;
     const p = S.players[msg.id];
     const now = performance.now();
-    if (p) { p.bubble = { text: msg.text, born: now, until: now + 4800 }; redraw(); }
-    addLogLine(msg);
+    if (p) { p.bubble = { text: msg.text, born: now, until: now + Math.min(9000, 3800 + msg.text.length * 45) }; redraw(); }
+    if (!addLogLine(msg)) return;
     if (msg.id !== S.myId) {
-        play('message');
+        const dnd = me() && me().status === 'dnd';
+        if (mentionsMe(msg.text)) {
+            if (!dnd) play('chime');
+            notify(t('mentioned_by', { name: msg.name }), msg.text, () => toggleChatLog(true));
+        } else if (!dnd) play('message');
         if (!logOpen) setUnread(getUnread() + 1);
     }
 });

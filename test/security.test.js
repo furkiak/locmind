@@ -39,3 +39,23 @@ test('rate limiter enforces a sliding window', () => {
     rl.forget('a');
     assert.equal(rl.buckets.has('a:x'), false);
 });
+
+test('client address: only proxy-appended X-Forwarded-For entries are trusted', () => {
+    const { clientIp } = require('../src/net/hub');
+    const req = (xff, remote = '10.0.0.2') => ({ socket: { remoteAddress: remote }, headers: xff ? { 'x-forwarded-for': xff } : {} });
+    // no proxy configured: the header is ignored completely
+    assert.equal(clientIp(req('6.6.6.6'), 0), '10.0.0.2');
+    // one proxy: an attacker can prepend anything, the proxy appends the real address last
+    assert.equal(clientIp(req('6.6.6.6, 203.0.113.9'), 1), '203.0.113.9');
+    assert.equal(clientIp(req('203.0.113.9'), true), '203.0.113.9');
+    // two proxies (CDN + nginx): the second entry from the right
+    assert.equal(clientIp(req('6.6.6.6, 203.0.113.9, 172.16.0.5'), 2), '203.0.113.9');
+    assert.equal(clientIp(req(null, '::ffff:192.0.2.1'), 1), '192.0.2.1');
+});
+
+test('config: TRUST_PROXY accepts true/false or a hop count', () => {
+    const { loadConfig } = require('../src/config');
+    assert.equal(loadConfig({ argv: [], env: { TRUST_PROXY: 'true' } }).TRUST_PROXY, 1);
+    assert.equal(loadConfig({ argv: [], env: { TRUST_PROXY: '2' } }).TRUST_PROXY, 2);
+    assert.equal(loadConfig({ argv: [], env: {} }).TRUST_PROXY, 0);
+});

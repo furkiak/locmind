@@ -1,14 +1,38 @@
+# docker compose up -d
+# The admin token is printed in the logs on first start:  docker compose logs locmind | grep -i token
 services:
   locmind:
     build: .
-    ports:
-      - "3000:3000"
+    image: locmind:3
+    restart: unless-stopped
+
+    # Host networking is the simplest way to run the built-in TURN relay on Linux: no port mapping,
+    # and the relay sees the real addresses. On Docker Desktop (macOS / Windows) remove this line
+    # and use the "ports" section below instead.
+    network_mode: host
+
+    # ports:
+    #   - "3000:3000/tcp"
+    #   - "3478:3478/udp"
+    #   - "3478:3478/tcp"
+    #   - "5349:5349/tcp"
+    #   - "49160-49359:49160-49359/udp"
+
     environment:
       PORT: 3000
-      # Behind a reverse proxy (nginx, Caddy, Traefik) set this to 1.
-      TRUST_PROXY: "0"
-      # Optional TURN relay for users behind strict NATs:
-      # TURN_URL: "turn:turn.example.com:3478"
-      # TURN_USERNAME: "user"
-      # TURN_CREDENTIAL: "secret"
-    restart: unless-stopped
+      SERVER_NAME: Locmind
+      # Your server's public address, needed when the machine is behind NAT (cloud VMs usually are).
+      # TURN_PUBLIC_IP: 203.0.113.10
+      # Behind nginx / Caddy / Traefik on the same machine:
+      # TRUST_PROXY: "1"
+      # Private community:
+      # SERVER_PASSWORD: change-me
+      # Optional extras that talk to third parties (off by default):
+      # YOUTUBE: "true"
+
+    volumes:
+      - locmind-data:/data
+      - ./media:/media
+
+volumes:
+  locmind-data:

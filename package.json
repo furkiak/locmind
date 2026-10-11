@@ -1,7 +1,7 @@
 {
   "name": "locmind",
-  "version": "2.0.0",
-  "description": "Locmind - a 2D virtual universe with proximity voice, video, rooms, shared tools and mini games.",
+  "version": "3.0.0",
+  "description": "Locmind - a self-hosted 2D virtual universe with proximity voice, video, rooms, shared tools and mini games. Zero runtime dependencies.",
   "main": "server.js",
   "private": true,
   "license": "MIT",
@@ -11,30 +11,30 @@
     "url": "git+https://github.com/furkiak/locmind.git"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
     "test": "node --test test/*.test.js",
     "test:e2e": "node test/e2e/run.mjs",
-    "screenshots": "node scripts/screenshots.mjs"
+    "screenshots": "node scripts/screenshots.mjs",
+    "bench": "node scripts/bench.mjs"
   },
   "keywords": [
     "metaverse",
     "webrtc",
-    "socket.io",
+    "websocket",
     "spatial-audio",
     "canvas",
-    "virtual-office"
+    "virtual-office",
+    "self-hosted",
+    "zero-dependency"
   ],
-  "dependencies": {
-    "compression": "^1.8.1",
-    "express": "^4.22.3",
-    "socket.io": "^4.8.4"
-  },
   "devDependencies": {
-    "playwright-core": "^1.49.0",
-    "socket.io-client": "^4.8.4"
+    "playwright-core": "^1.49.0"
+  },
+  "bin": {
+    "locmind": "server.js"
   }
 }

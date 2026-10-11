@@ -24,6 +24,7 @@
     <link rel="modulepreload" href="/js/audio.js">
     <link rel="modulepreload" href="/js/rtc.js">
     <link rel="modulepreload" href="/js/net.js">
+    <link rel="modulepreload" href="/js/transport.js">
     <link rel="modulepreload" href="/js/movement.js">
     <link rel="modulepreload" href="/js/input.js">
     <link rel="modulepreload" href="/js/render.js">
@@ -34,6 +35,11 @@
     <link rel="modulepreload" href="/js/notes.js">
     <link rel="modulepreload" href="/js/music.js">
     <link rel="modulepreload" href="/js/settings.js">
+    <link rel="modulepreload" href="/js/avatar.js">
+    <link rel="modulepreload" href="/js/profile.js">
+    <link rel="modulepreload" href="/js/social.js">
+    <link rel="modulepreload" href="/js/roomtools.js">
+    <link rel="modulepreload" href="/js/path.js">
 </head>
 <body>
 
@@ -60,6 +66,11 @@
             <p data-i18n="tagline">A virtual universe to talk, build and play.</p>
         </div>
 
+        <div id="server-info" class="server-info" hidden>
+            <b id="server-name"></b>
+            <p id="server-motd"></p>
+        </div>
+
         <label class="field">
             <span data-i18n="nickname">Nickname</span>
             <input id="nick" class="input" type="text" maxlength="15" autocomplete="nickname" autocapitalize="off" spellcheck="false" data-i18n-placeholder="nickname_ph" placeholder="What should we call you?">
@@ -67,13 +78,13 @@
 
         <div class="field">
             <span data-i18n="avatar">Avatar</span>
-            <div class="avatars" id="avatars" role="radiogroup" aria-label="Avatar">
-                <button type="button" class="avatar is-selected" role="radio" aria-checked="true" data-avatar="usr1.png"><img src="/usr1.png" alt="" width="56" height="56"></button>
-                <button type="button" class="avatar" role="radio" aria-checked="false" data-avatar="usr2.png"><img src="/usr2.png" alt="" width="56" height="56"></button>
-                <button type="button" class="avatar" role="radio" aria-checked="false" data-avatar="usr3.png"><img src="/usr3.png" alt="" width="56" height="56"></button>
-                <button type="button" class="avatar" role="radio" aria-checked="false" data-avatar="usr4.png"><img src="/usr4.png" alt="" width="56" height="56"></button>
-            </div>
+            <div id="avatars"></div>
         </div>
+
+        <label class="field" id="server-pass-field" hidden>
+            <span data-i18n="server_password">Server password</span>
+            <input id="server-pass" class="input" type="password" maxlength="64" autocomplete="current-password">
+        </label>
 
         <label class="check">
             <input type="checkbox" id="tos">
@@ -96,12 +107,18 @@
 
 <!-- ============================================================ HUD -->
 <div id="hud" hidden>
-    <div id="statusbar" class="glass pill">
-        <span id="status-dot" class="dot"></span>
+    <button id="statusbar" class="glass pill" type="button" aria-haspopup="dialog" data-i18n-title="profile" title="Profile">
+        <span id="status-avatar"></span>
         <strong id="status-name"></strong>
         <span class="sep"></span>
         <span class="muted"><i data-icon="users"></i> <span id="status-online">1</span></span>
-    </div>
+        <span class="sep"></span>
+        <span id="net-chip" class="net"><span id="status-dot" class="dot"></span><span id="net-rtt"></span></span>
+    </button>
+    <div id="profile-pop" class="glass popover" role="dialog" aria-label="Profile" hidden></div>
+    <div id="player-card" class="glass popover" role="dialog" hidden></div>
+    <div id="timer-chip" class="glass pill" hidden><i data-icon="clock"></i><b id="timer-left">0:00</b><span id="timer-label" class="muted"></span></div>
+    <div id="announce" class="glass" role="alert" hidden></div>
 
     <div id="zone-chip" class="glass pill">
         <i data-icon="mic" id="zone-icon"></i>
@@ -131,7 +148,7 @@
     </section>
 
     <form id="chatbar" class="glass pill" hidden autocomplete="off">
-        <input id="chat-input" type="text" maxlength="80" data-i18n-placeholder="chat_ph" placeholder="Say something…" autocomplete="off">
+        <input id="chat-input" type="text" maxlength="160" data-i18n-placeholder="chat_ph" placeholder="Say something…" autocomplete="off">
         <button class="icon-btn send" type="submit" data-i18n-title="send" title="Send"><i data-icon="send"></i></button>
     </form>
 
@@ -189,7 +206,8 @@
     </header>
     <div class="music-body">
         <div class="music-now">
-            <div class="yt-frame"><div id="yt-player"></div><div class="yt-empty" id="yt-empty"><i data-icon="music"></i></div></div>
+            <div class="yt-frame"><div id="yt-player"></div><div class="yt-empty" id="yt-empty"><i data-icon="music"></i></div><div class="eq" id="music-eq" hidden><i></i><i></i><i></i><i></i><i></i></div></div>
+                <audio id="music-audio" preload="auto" hidden></audio>
             <div class="music-meta">
                 <div class="muted small" data-i18n="now_playing">Now playing</div>
                 <div class="music-title" id="music-title">—</div>
@@ -200,14 +218,57 @@
                 </div>
             </div>
         </div>
-        <form class="music-add" id="music-form" autocomplete="off">
-            <input id="music-input" class="input" type="text" data-i18n-placeholder="music_ph" placeholder="YouTube link or search…">
-            <button class="btn btn-primary" type="submit"><i data-icon="plus"></i></button>
-        </form>
-        <ul class="music-results" id="music-results" hidden></ul>
+        <div class="segmented music-tabs" id="music-tabs" role="tablist">
+            <button type="button" role="tab" data-tab="library" data-i18n="library">Library</button>
+            <button type="button" role="tab" data-tab="youtube">YouTube</button>
+        </div>
+        <div id="music-library" class="music-library">
+            <div class="music-add">
+                <input id="library-filter" class="input" type="search" data-i18n-placeholder="library_ph" placeholder="Search the library…">
+                <label class="btn" id="upload-btn" data-i18n-title="upload" title="Upload"><i data-icon="upload"></i><input id="upload-input" type="file" accept="audio/*" hidden></label>
+            </div>
+            <div class="upload-progress" id="upload-progress" hidden><i></i></div>
+            <ul class="music-results library-list" id="library-list"></ul>
+        </div>
+        <div id="music-youtube">
+            <form class="music-add" id="music-form" autocomplete="off">
+                <input id="music-input" class="input" type="text" data-i18n-placeholder="music_ph" placeholder="YouTube link or search…">
+                <button class="btn btn-primary" type="submit"><i data-icon="plus"></i></button>
+            </form>
+            <ul class="music-results" id="music-results" hidden></ul>
+        </div>
         <div class="muted small" data-i18n="queue">Up next</div>
         <ol class="music-queue" id="music-queue"></ol>
     </div>
+</section>
+
+<section id="win-room" class="win glass" hidden>
+    <header class="win-bar">
+        <div class="traffic"><button class="tl tl-close" type="button" data-act="close" aria-label="Close"></button><button class="tl tl-min" type="button" data-act="close" aria-label="Minimize"></button></div>
+        <h2><i data-icon="users"></i><span id="room-win-title" data-i18n="room_tools">Room</span></h2>
+    </header>
+    <div class="room-body" id="room-body"></div>
+</section>
+
+<section id="win-dm" class="win glass" hidden>
+    <header class="win-bar">
+        <div class="traffic"><button class="tl tl-close" type="button" data-act="close" aria-label="Close"></button><button class="tl tl-min" type="button" data-act="close" aria-label="Minimize"></button></div>
+        <h2><i data-icon="send"></i><span data-i18n="messages">Messages</span></h2>
+    </header>
+    <div class="dm-threads" id="dm-threads"></div>
+    <ol class="dm-list" id="dm-list"></ol>
+    <form class="dm-form" id="dm-form" autocomplete="off">
+        <input id="dm-input" class="input" type="text" maxlength="300" data-i18n-placeholder="dm_ph" placeholder="Write a private message…">
+        <button class="btn btn-primary" type="submit" data-i18n-title="send" title="Send"><i data-icon="send"></i></button>
+    </form>
+</section>
+
+<section id="win-gallery" class="win glass" hidden>
+    <header class="win-bar">
+        <div class="traffic"><button class="tl tl-close" type="button" data-act="close" aria-label="Close"></button><button class="tl tl-min" type="button" data-act="close" aria-label="Minimize"></button><button class="tl tl-zoom" type="button" data-act="zoom" aria-label="Zoom"></button></div>
+        <h2><i data-icon="grid"></i><span data-i18n="gallery">Cameras</span></h2>
+    </header>
+    <div class="gallery" id="gallery"></div>
 </section>
 
 <div id="win-screens"></div>
@@ -255,6 +316,8 @@
         <div class="row stack"><span data-i18n="master_volume">Master volume</span><input id="set-volume" class="range" type="range" min="0" max="150" value="100"></div>
         <div class="row"><span data-i18n="sfx">Sound effects</span><label class="switch"><input type="checkbox" id="set-sfx"><i></i></label></div>
         <div class="row"><span data-i18n="spatial">Stereo spatial audio</span><label class="switch"><input type="checkbox" id="set-spatial"><i></i></label></div>
+        <div class="row"><span><span data-i18n="ptt">Push to talk</span> <small class="muted" data-i18n="ptt_hint">hold V</small></span><label class="switch"><input type="checkbox" id="set-ptt"><i></i></label></div>
+        <div class="row"><span data-i18n="notify">Desktop notifications</span><label class="switch"><input type="checkbox" id="set-notify"><i></i></label></div>
         <div class="row"><span data-i18n="minimap">Show minimap</span><label class="switch"><input type="checkbox" id="set-minimap"><i></i></label></div>
         <div class="row"><span data-i18n="reduce_motion">Reduce motion</span><label class="switch"><input type="checkbox" id="set-motion"><i></i></label></div>
     </div>
@@ -278,7 +341,6 @@
     </div>
 </div>
 
-<script src="/socket.io/socket.io.js"></script>
 <script src="/shared/world.js"></script>
 <script type="module" src="/js/main.js"></script>
 </body>

@@ -24,6 +24,8 @@ const SOUNDS = {
     pop: () => { tone(480, 0, .08, { to: 760, type: 'triangle', gain: .08 }); },
     error: () => { tone(220, 0, .18, { type: 'sawtooth', gain: .05, to: 170 }); },
     unlock: () => { tone(660, 0, .1); tone(990, .09, .18); },
+    chime: () => { tone(784, 0, .22, { gain: .08 }); tone(1175, .12, .4, { gain: .07 }); },
+    hand: () => { tone(700, 0, .12, { to: 980, type: 'triangle', gain: .07 }); },
     kick: () => { tone(160, 0, .1, { to: 70, gain: .2 }); },
     goal: () => { [523, 659, 784, 1047].forEach((f, i) => tone(f, i * .1, .28, { type: 'triangle', gain: .1 })); tone(1318, .45, .5, { type: 'triangle', gain: .09 }); }
 };

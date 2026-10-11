@@ -1,0 +1,57 @@
+# /etc/systemd/system/locmind.service
+#   sudo useradd --system --home /opt/locmind --shell /usr/sbin/nologin locmind
+#   sudo cp -r . /opt/locmind && sudo cp deploy/locmind.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now locmind
+#   journalctl -u locmind | grep -i "admin token"
+[Unit]
+Description=Locmind virtual universe
+Documentation=https://github.com/furkiak/locmind
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=locmind
+Group=locmind
+WorkingDirectory=/opt/locmind
+Environment=NODE_ENV=production DATA_DIR=/var/lib/locmind MEDIA_DIR=/var/lib/locmind/media LOG_FORMAT=json
+# Put your settings (PORT, TURN_PUBLIC_IP, TLS_CERT, SERVER_PASSWORD, ...) in this file:
+EnvironmentFile=-/etc/locmind.env
+ExecStart=/usr/bin/node /opt/locmind/server.js
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=10
+
+# state lives in /var/lib/locmind, owned by the service user
+StateDirectory=locmind
+StateDirectoryMode=0700
+LimitNOFILE=65536
+
+# lets Locmind listen on 443 / 80 directly without running as root
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+# sandboxing
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+ReadWritePaths=/var/lib/locmind
+# TLS files (if you use Let's Encrypt directly), read only
+# ReadOnlyPaths=/etc/letsencrypt
+
+[Install]
+WantedBy=multi-user.target

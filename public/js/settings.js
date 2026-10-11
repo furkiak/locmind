@@ -3,6 +3,7 @@ import { t, setLang, getLang } from './i18n.js';
 import { byId, $$, clear, setRangeFill } from './dom.js';
 import { openModal } from './ui.js';
 import { setMasterVolume, listMics, startMic } from './audio.js';
+import { enableNotifications } from './social.js';
 
 export function applyTheme() {
     let theme = S.settings.theme || 'auto';
@@ -36,7 +37,8 @@ export function initSettings() {
 
     const vol = byId('set-volume');
     vol.addEventListener('input', () => { setSetting('volume', +vol.value); setRangeFill(vol); setMasterVolume(+vol.value); });
-    for (const [id, key, after] of [['set-sfx', 'sfx'], ['set-spatial', 'spatial'], ['set-minimap', 'minimap', applyMinimap], ['set-motion', 'reduceMotion', applyTheme]]) {
+    byId('set-notify').addEventListener('change', async e => { await enableNotifications(e.target.checked); e.target.checked = !!S.settings.notify; });
+    for (const [id, key, after] of [['set-sfx', 'sfx'], ['set-spatial', 'spatial'], ['set-ptt', 'ptt'], ['set-minimap', 'minimap', applyMinimap], ['set-motion', 'reduceMotion', applyTheme]]) {
         byId(id).addEventListener('change', e => { setSetting(key, e.target.checked); if (after) after(); });
     }
     byId('set-mic').addEventListener('change', async e => { setSetting('micId', e.target.value); await startMic(); });
@@ -49,6 +51,8 @@ function syncControls() {
     const vol = byId('set-volume'); vol.value = S.settings.volume; setRangeFill(vol);
     byId('set-sfx').checked = !!S.settings.sfx;
     byId('set-spatial').checked = !!S.settings.spatial;
+    byId('set-ptt').checked = !!S.settings.ptt;
+    byId('set-notify').checked = !!S.settings.notify && 'Notification' in window && Notification.permission === 'granted';
     byId('set-minimap').checked = !!S.settings.minimap;
     byId('set-motion').checked = !!S.settings.reduceMotion;
 }

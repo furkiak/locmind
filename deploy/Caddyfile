@@ -1,0 +1,7 @@
+# Optional: Caddy in front of Locmind, with automatic HTTPS certificates.
+# Start Locmind with TRUST_PROXY=1. WebSockets are proxied automatically.
+# The TURN ports (3478 udp/tcp, 5349 tcp, 49160-49359 udp) go straight to Locmind.
+locmind.example.com {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:3000
+}

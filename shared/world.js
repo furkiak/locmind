@@ -23,6 +23,8 @@
         HEAR_DISTANCE: 400,      // proximity voice radius (px)
         HEAR_LINK_DISTANCE: 460, // radius at which a voice link is dropped (hysteresis)
         STADIUM_ID: 'stadium_1',
+        AUDITORIUM_ID: 'auditorium_1',
+        WHISPER_DISTANCE: 170,   // audience members inside the auditorium only hear close neighbours
         KICK_RADIUS: 60
     });
 
@@ -30,6 +32,13 @@
         id: C.STADIUM_ID,
         x: 1800, y: 100, w: 1200, h: 800,
         goalSize: 200, goalDepth: 40
+    });
+
+    // Auditorium: whoever stands on the stage is heard by the whole audience.
+    const AUDITORIUM = Object.freeze({
+        id: C.AUDITORIUM_ID,
+        x: 1800, y: 1100, w: 1200, h: 900,
+        stage: Object.freeze({ x: 2150, y: 1130, w: 500, h: 180 })
     });
 
     // Apple-style system accent colours a room owner can pick from.
@@ -42,6 +51,19 @@
     const REACTIONS = Object.freeze(['👍', '❤️', '😂', '🎉', '👏', '🔥', '😮', '😢', '🙌', '👋']);
 
     const AVATARS = Object.freeze(['usr1.png', 'usr2.png', 'usr3.png', 'usr4.png']);
+
+    // Faces for the built-in avatar maker ("e:<emoji>:<colour>").
+    const AVATAR_EMOJIS = Object.freeze(['😀', '😎', '🤓', '🥳', '😺', '🦊', '🐼', '🐸', '🦁', '🐯', '🐨', '🐵', '🦄', '🐙', '🤖', '👽', '👻', '🎃', '🧑‍🚀', '🧙', '🥷', '🧑‍🎨', '🧑‍💻', '🦸']);
+
+    const STATUSES = Object.freeze(['available', 'busy', 'away', 'dnd']);
+
+    /** Validates an avatar value: one of the bundled images or an "e:<emoji>:<colour>" descriptor. */
+    function validAvatar(v) {
+        if (typeof v !== 'string') return false;
+        if (AVATARS.includes(v)) return true;
+        const m = /^e:(.+):([a-z]+)$/u.exec(v);
+        return !!m && AVATAR_EMOJIS.includes(m[1]) && Object.prototype.hasOwnProperty.call(ROOM_COLORS, m[2]);
+    }
 
     function buildSlots() {
         const slots = [];
@@ -66,6 +88,7 @@
             }
         }
         slots.push({ id: STADIUM.id, x: STADIUM.x, y: STADIUM.y, w: STADIUM.w, h: STADIUM.h, type: 'stadium' });
+        slots.push({ id: AUDITORIUM.id, x: AUDITORIUM.x, y: AUDITORIUM.y, w: AUDITORIUM.w, h: AUDITORIUM.h, type: 'auditorium' });
         return slots;
     }
 
@@ -114,5 +137,14 @@
 
     function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 
-    return { C, STADIUM, ROOM_COLORS, REACTIONS, AVATARS, buildSlots, rectsIntersect, doorStart, slotWalls, slotDoor, wallsBlock, gateBlocks, slotAt, clamp };
+    /** Is a player (top-left x/y) standing on the auditorium stage? */
+    function onStage(x, y) {
+        const s = AUDITORIUM.stage, cx = x + C.PLAYER_SIZE / 2, cy = y + C.PLAYER_SIZE / 2;
+        return cx > s.x && cx < s.x + s.w && cy > s.y && cy < s.y + s.h;
+    }
+
+    return {
+        C, STADIUM, AUDITORIUM, ROOM_COLORS, REACTIONS, AVATARS, AVATAR_EMOJIS, STATUSES,
+        buildSlots, rectsIntersect, doorStart, slotWalls, slotDoor, wallsBlock, gateBlocks, slotAt, clamp, validAvatar, onStage
+    };
 }));

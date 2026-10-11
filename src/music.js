@@ -15,9 +15,10 @@ class MusicQueue {
         this.seq = 0;
     }
 
-    add({ videoId, title, addedBy }) {
+    /** item: { source: 'youtube', videoId } or { source: 'library', trackId }, plus title / addedBy. */
+    add(item) {
         if (this.queue.length >= MAX_QUEUE) return null;
-        const item = { id: ++this.seq, videoId, title, addedBy };
+        item = { id: ++this.seq, source: item.source || 'youtube', ...item };
         this.queue.push(item);
         if (!this.current) this.advance();
         return item;
