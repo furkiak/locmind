@@ -5,6 +5,11 @@ const { createApp } = require('./src/app');
 
 const { server, close, world } = createApp();
 
+server.on('error', err => {
+    console.error(err.code === 'EADDRINUSE' ? `Port ${config.PORT} is already in use.` : err);
+    process.exit(1);
+});
+
 server.listen(config.PORT, config.HOST, () => {
     console.log(`Locmind is running on http://localhost:${config.PORT}`);
 });

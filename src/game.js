@@ -6,6 +6,8 @@ const { cleanText, cleanMultiline, isPlainObject, RateLimiter } = require('./sec
 const { parseVideoId } = require('./youtube');
 
 const noop = () => {};
+/** Timer callbacks must never take the process down. */
+const safe = fn => () => { try { fn(); } catch (err) { console.error('[timer]', err); } };
 const rkey = id => `room:${id}`;
 const round = (v, d = 1) => { const m = 10 ** d; return Math.round(v * m) / m; };
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
@@ -55,7 +57,7 @@ function createGame(io, { world, youtube, config, emojiFiles = [], limiter = new
     world.on('football:reset', () => { broadcastBall(); io.emit('score', world.football.score); });
 
     // Batched movement: one message per tick per client instead of one per move per player.
-    const moveTimer = setInterval(() => {
+    const moveTimer = setInterval(safe(() => {
         if (!dirty.size) return;
         const batch = [];
         for (const id of dirty) {
@@ -64,9 +66,9 @@ function createGame(io, { world, youtube, config, emojiFiles = [], limiter = new
         }
         dirty.clear();
         if (batch.length) io.emit('players:move', batch);
-    }, 50);
+    }), 50);
 
-    const ballTimer = setInterval(() => {
+    const ballTimer = setInterval(safe(() => {
         const { moved, goal } = world.football.tick();
         if (goal) {
             io.emit('goal', goal);
@@ -74,10 +76,10 @@ function createGame(io, { world, youtube, config, emojiFiles = [], limiter = new
         } else if (moved) {
             broadcastBall(world.football.moving ? false : true);
         }
-    }, 30);
+    }), 30);
 
     // Server side backstop for the client's AFK logic.
-    const afkTimer = setInterval(() => {
+    const afkTimer = setInterval(safe(() => {
         const limit = config.AFK_LIMIT_MS + config.AFK_GRACE_MS;
         const t = world.now();
         for (const p of Array.from(world.players.values())) {
@@ -88,9 +90,9 @@ function createGame(io, { world, youtube, config, emojiFiles = [], limiter = new
         }
         limiter.sweep();
         for (const [token, saved] of resumes) if (saved.expires < t) resumes.delete(token);
-    }, 30000);
+    }), 30000);
 
-    const roomTimer = setInterval(() => announceDestroyed(world.sweepRooms()), 5000);
+    const roomTimer = setInterval(safe(() => announceDestroyed(world.sweepRooms())), 5000);
 
     for (const timer of [moveTimer, ballTimer, afkTimer, roomTimer]) timer.unref();
 
