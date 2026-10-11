@@ -1,0 +1,14 @@
+services:
+  locmind:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      # Behind a reverse proxy (nginx, Caddy, Traefik) set this to 1.
+      TRUST_PROXY: "0"
+      # Optional TURN relay for users behind strict NATs:
+      # TURN_URL: "turn:turn.example.com:3478"
+      # TURN_USERNAME: "user"
+      # TURN_CREDENTIAL: "secret"
+    restart: unless-stopped
