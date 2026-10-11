@@ -1,65 +1,11 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { connect } = require('../src/net/client');
-const { createApp } = require('../src/app');
 const W = require('../shared/world');
-const { tmpDir } = require('./helpers');
+const { bootApp, client, join, walkTo, sleep, slotCenter } = require('./helpers');
 
 const { C } = W;
-
-async function boot(extra = {}) {
-    const fakeFetch = async url => ({
-        ok: true,
-        json: async () => ({ title: `Title of ${String(url).slice(-11)}` })
-    });
-    const ctx = createApp({ fetchImpl: fakeFetch, LOG_LEVEL: 'silent', MAX_CONNECTIONS_PER_IP: 1000, TURN: false, DATA_DIR: tmpDir(), ...extra });
-    await ctx.ready;
-    await new Promise(r => ctx.server.listen(0, '127.0.0.1', r));
-    ctx.url = `http://127.0.0.1:${ctx.server.address().port}`;
-    return ctx;
-}
-
-function client(ctx) {
-    const s = connect(ctx.url);
-    s.events = [];
-    s.onAny((name, ...args) => s.events.push([name, ...args]));
-    s.waitFor = (name, pred = () => true, timeout = 2000) => new Promise((resolve, reject) => {
-        const hit = s.events.find(e => e[0] === name && pred(...e.slice(1)));
-        if (hit) return resolve(hit.slice(1));
-        const timer = setTimeout(() => reject(new Error(`timeout waiting for ${name}`)), timeout);
-        const handler = (...args) => { if (pred(...args)) { clearTimeout(timer); s.off(name, handler); resolve(args); } };
-        s.on(name, handler);
-    });
-    s.call = (event, payload) => new Promise(resolve => s.emit(event, payload, resolve));
-    return new Promise((resolve, reject) => { s.on('connect', () => resolve(s)); s.on('connect_error', reject); });
-}
-
-async function join(ctx, nickname) {
-    const s = await client(ctx);
-    const res = await s.call('join', { nickname, avatar: 'usr1.png' });
-    s.me = res;
-    return s;
-}
-
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-
-/** Walks the server-side player to a point in small legal steps (like a real client). */
-async function walkTo(ctx, sock, tx, ty) {
-    const p = ctx.world.players.get(sock.id);
-    while (Math.hypot(tx - p.x, ty - p.y) > 1) {
-        const d = Math.hypot(tx - p.x, ty - p.y), step = Math.min(10, d);
-        const nx = p.x + (tx - p.x) / d * step, ny = p.y + (ty - p.y) / d * step;
-        const before = { x: p.x, y: p.y };
-        sock.emit('move', { x: nx, y: ny, dirX: 1, dirY: 0 });
-        await sleep(25);
-        if (p.x === before.x && p.y === before.y) throw new Error(`blocked at ${p.x},${p.y} -> ${tx},${ty}`);
-    }
-}
-
-function slotCenter(slot) {
-    return { x: slot.x + slot.w / 2 - C.PLAYER_SIZE / 2, y: slot.y + slot.h / 2 - C.PLAYER_SIZE / 2 };
-}
+const boot = bootApp;
 
 test('protocol end to end', async t => {
     const ctx = await boot();
@@ -69,7 +15,7 @@ test('protocol end to end', async t => {
     await t.test('join returns the world and announces the player', async () => {
         const a = await join(ctx, 'Alice'); socks.push(a);
         assert.equal(a.me.ok, true);
-        assert.equal(a.me.slots.length, 21);
+        assert.equal(a.me.slots.length, 22);
         assert.ok(a.me.emojis.images.length >= 4, 'emoji files are served from public/emoji');
         assert.ok(Array.isArray(a.me.iceServers), 'ICE servers come with the join answer');
         assert.ok(!JSON.stringify(a.me).includes('password'), 'no secrets in the world snapshot');
@@ -268,7 +214,7 @@ test('protocol end to end', async t => {
         await sleep(200);
         const chats = a.events.filter(e => e[0] === 'chat');
         assert.ok(chats.length >= 1 && chats.length <= 4, `got ${chats.length}`);
-        assert.ok(chats[0][1].text.length <= 80);
+        assert.ok(chats[0][1].text.length <= 160);
     });
 
     await t.test('disconnect cleans up', async () => {

@@ -65,7 +65,7 @@ class Store {
         if (!s.turnSecret) { s.turnSecret = crypto.randomBytes(32).toString('base64url'); changed = true; }
         if (!s.adminToken) { s.adminToken = crypto.randomBytes(18).toString('base64url'); changed = true; }
         if (changed) this.write('secrets', s);
-        return s;
+        return { ...s, created: changed };
     }
 }
 

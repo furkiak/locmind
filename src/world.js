@@ -7,14 +7,18 @@ const { cleanText, hashPassword, verifyPassword } = require('./security');
 const { MusicQueue } = require('./music');
 const { Football } = require('./football');
 
-const { C, STADIUM } = W;
+const { C, STADIUM, AUDITORIUM } = W;
 const PS = C.PLAYER_SIZE;
 
 const MOVE_BUDGET_RATE = C.SPEED * 1.8;  // px / s a player may "earn"
 const MOVE_BUDGET_CAP = 320;             // burst allowance (network jitter, tab lag)
 const MAX_ROOMS_PER_OWNER = 2;
-const ROOM_GRACE_MS = 60 * 1000;   // a room whose last occupant *dropped* survives this long (reconnects)
+const ROOM_GRACE_MS = 60 * 1000;         // a room whose last occupant *dropped* survives this long (reconnects)
+const ROOM_KICK_BAN_MS = 10 * 60 * 1000;
 const MAX_WB_BATCHES = 600;
+const CHAT_HISTORY = 40;
+
+const hasColor = c => Object.prototype.hasOwnProperty.call(W.ROOM_COLORS, c);
 
 class World extends EventEmitter {
     constructor(now = Date.now) {
@@ -26,17 +30,25 @@ class World extends EventEmitter {
         this.rooms = new Map();
         this.occupancy = new Map(this.slots.map(s => [s.id, new Set()]));
         this.football = new Football();
+        this.publicChat = [];
         this.rooms.set(STADIUM.id, this._newRoom({ id: STADIUM.id, name: 'Football Arena', owner: null, builtin: true, type: 'stadium', color: 'green' }));
+        this.rooms.set(AUDITORIUM.id, this._newRoom({ id: AUDITORIUM.id, name: 'Auditorium', owner: null, builtin: true, type: 'auditorium', color: 'purple' }));
     }
 
-    _newRoom({ id, name, owner, ownerToken = null, color, passwordRecord = null, builtin = false, type = 'conference' }) {
+    _newRoom({ id, name, owner, ownerToken = null, color, passwordRecord = null, builtin = false, permanent = false, type = 'conference', topic = '' }) {
         return {
-            id, name, owner, ownerToken, color, type, builtin,
+            id, name, owner, ownerToken, color, type, builtin, permanent, topic,
             uid: crypto.randomBytes(8).toString('hex'),   // distinguishes two rooms that reuse the same plot
             password: passwordRecord,
+            banned: new Map(),       // player token -> until (kicked by the owner)
             whiteboard: [],          // batches: { c, w, s: [[x0,y0,x1,y1], ...] }
             note: { text: '', rev: 0 },
-            music: new MusicQueue(this.now)
+            music: new MusicQueue(this.now),
+            chat: [],
+            poll: null,
+            hands: [],
+            timer: null,
+            expiresAt: null
         };
     }
 
@@ -44,8 +56,9 @@ class World extends EventEmitter {
 
     /**
      * @param {object} [resume] state of a previous session of the same player (see takeResume in game.js)
+     * @param {object} [meta]   { ip } - kept server side for moderation
      */
-    addPlayer(id, { nickname, avatar }, resume = null) {
+    addPlayer(id, { nickname, avatar, status, statusText }, resume = null, meta = {}) {
         let name = cleanText(nickname, 15) || 'Guest';
         const taken = new Set(Array.from(this.players.values(), p => p.nickname.toLowerCase()));
         if (taken.has(name.toLowerCase())) {
@@ -57,12 +70,17 @@ class World extends EventEmitter {
         const t = this.now();
         const player = {
             id, nickname: name,
-            avatar: W.AVATARS.includes(avatar) ? avatar : W.AVATARS[0],
+            avatar: W.validAvatar(avatar) ? avatar : W.AVATARS[0],
+            status: W.STATUSES.includes(status) ? status : 'available',
+            statusText: cleanText(statusText, 40),
             x: spawn.x, y: spawn.y, dirX: 0, dirY: 1,
             slotId: null, roomId: null,
             muted: false, cam: false, screen: false,
             token: resume ? resume.token : crypto.randomBytes(16).toString('hex'),
             unlocked: new Set(resume ? resume.unlocked : []),
+            chatMutedUntil: resume ? resume.chatMutedUntil || 0 : 0,
+            ip: meta.ip || '',
+            joinedAt: t,
             budget: MOVE_BUDGET_CAP, lastMoveAt: t, lastActive: t
         };
         this.players.set(id, player);
@@ -78,9 +96,7 @@ class World extends EventEmitter {
         const slot = W.slotAt(this.slots, p.x + PS / 2, p.y + PS / 2);
         const room = slot ? this.rooms.get(slot.id) : null;
         if (room && !this._canEnter(p, room)) {
-            // the plot was re-built as a locked room while the player was away
-            p.x = W.doorStart(slot) + C.DOOR_SIZE / 2 - PS / 2;
-            p.y = slot.y + slot.h + 24;
+            this._placeAtDoor(p, slot);
             return this._enterWorldAt(p);
         }
         p.slotId = slot ? slot.id : null;
@@ -111,10 +127,25 @@ class World extends EventEmitter {
     }
 
     publicPlayer(p) {
-        return { id: p.id, nickname: p.nickname, avatar: p.avatar, x: p.x, y: p.y, dirX: p.dirX, dirY: p.dirY, muted: p.muted, cam: p.cam, screen: p.screen };
+        return {
+            id: p.id, nickname: p.nickname, avatar: p.avatar, status: p.status, statusText: p.statusText,
+            x: p.x, y: p.y, dirX: p.dirX, dirY: p.dirY, muted: p.muted, cam: p.cam, screen: p.screen
+        };
     }
 
     publicPlayers() { return Array.from(this.players.values(), p => this.publicPlayer(p)); }
+
+    /** Applies profile changes; returns true when something changed. */
+    setProfile(p, { status, statusText, avatar } = {}) {
+        let changed = false;
+        if (status !== undefined && W.STATUSES.includes(status) && status !== p.status) { p.status = status; changed = true; }
+        if (statusText !== undefined) {
+            const t = cleanText(statusText, 40);
+            if (t !== p.statusText) { p.statusText = t; changed = true; }
+        }
+        if (avatar !== undefined && W.validAvatar(avatar) && avatar !== p.avatar) { p.avatar = avatar; changed = true; }
+        return changed;
+    }
 
     /**
      * Removes a player; returns the ids of rooms that vanished because they became empty.
@@ -123,26 +154,31 @@ class World extends EventEmitter {
      */
     removePlayer(id, { grace = false } = {}) {
         const p = this.players.get(id);
-        if (!p) return { player: null, destroyed: [] };
+        if (!p) return { player: null, destroyed: [], room: null };
         this.players.delete(id);
         const destroyed = [];
+        const room = p.roomId ? this.rooms.get(p.roomId) : null;
+        if (room) this.lowerHand(room, id);
         if (p.slotId) {
             this.occupancy.get(p.slotId).delete(id);
             if (grace) this._hold(p.slotId); else this._collect(p.slotId, destroyed);
         }
-        return { player: p, destroyed };
+        return { player: p, destroyed, room };
     }
 
     _hold(slotId) {
         const room = this.rooms.get(slotId);
-        if (room && !room.builtin && this.occupancy.get(slotId).size === 0) room.expiresAt = this.now() + ROOM_GRACE_MS;
-        else if (room && room.builtin) this._collect(slotId, []);
+        if (!room) return;
+        if (room.builtin) { this._collect(slotId, []); return; }
+        if (!room.permanent && this.occupancy.get(slotId).size === 0) room.expiresAt = this.now() + ROOM_GRACE_MS;
     }
 
     /** Destroys rooms whose grace period ran out. Returns their ids. */
     sweepRooms() {
         const t = this.now(), gone = [];
         for (const room of Array.from(this.rooms.values())) {
+            for (const [token, until] of room.banned) if (until < t) room.banned.delete(token);
+            if (room.timer && room.timer.endsAt < t - 60000) room.timer = null;
             if (!room.expiresAt) continue;
             if (this.occupancy.get(room.id).size > 0) { room.expiresAt = null; continue; }
             if (room.expiresAt <= t) { this.rooms.delete(room.id); gone.push(room.id); }
@@ -155,8 +191,8 @@ class World extends EventEmitter {
     publicRoom(room) {
         const owner = room.owner ? this.players.get(room.owner) : null;
         return {
-            id: room.id, name: room.name, color: room.color, type: room.type,
-            builtin: room.builtin, hasPassword: !!room.password, owner: room.owner,
+            id: room.id, name: room.name, color: room.color, type: room.type, topic: room.topic,
+            builtin: room.builtin, permanent: room.permanent, hasPassword: !!room.password, owner: room.owner,
             ownerName: owner ? owner.nickname : null,
             occupants: this.occupancy.get(room.id) ? this.occupancy.get(room.id).size : 0
         };
@@ -165,10 +201,12 @@ class World extends EventEmitter {
     publicRooms() { return Array.from(this.rooms.values(), r => this.publicRoom(r)); }
 
     _canEnter(p, room) {
+        const ban = room.banned.get(p.token);
+        if (ban && ban > this.now()) return false;
         return !room.password || room.owner === p.id || p.unlocked.has(room.uid);
     }
 
-    /** Destroys a conference room whose slot became empty. */
+    /** Destroys a conference room whose slot became empty (permanent and built-in rooms stay). */
     _collect(slotId, destroyed) {
         const room = this.rooms.get(slotId);
         if (!room) return;
@@ -177,11 +215,56 @@ class World extends EventEmitter {
             if (slotId === STADIUM.id) { this.football.reset(true); this.emit('football:reset'); }
             return;
         }
+        if (room.permanent) {
+            room.poll = null; room.hands = []; room.timer = null;
+            return;
+        }
         this.rooms.delete(slotId);
         destroyed.push(slotId);
     }
 
-    createRoom(p, { slotId, name, password, color }) {
+    _placeAtDoor(p, slot) {
+        p.x = W.doorStart(slot) + C.DOOR_SIZE / 2 - PS / 2;
+        p.y = Math.min(C.HEIGHT - PS, slot.y + slot.h + 24);
+    }
+
+    /** Moves a player out through the door of `slot`. Returns the membership change, if any. */
+    _eject(p, slot) {
+        this._placeAtDoor(p, slot);
+        if (p.slotId) this.occupancy.get(p.slotId).delete(p.id);
+        p.slotId = null;
+        const prev = p.roomId;
+        p.roomId = null;
+        const room = prev ? this.rooms.get(prev) : null;
+        if (room) this.lowerHand(room, p.id);
+        return prev ? { player: p, from: prev, to: null } : null;
+    }
+
+    /**
+     * Installs a room on a plot and sorts out who may stay inside.
+     * @returns {{moved: object[], membership: object[]}}
+     */
+    _install(room, slot, keep = null) {
+        this.rooms.set(slot.id, room);
+        const moved = [], membership = [];
+        const inflated = { x: slot.x - PS, y: slot.y - PS, w: slot.w + PS * 2, h: slot.h + PS * 2 };
+        for (const other of this.players.values()) {
+            if (other === keep) continue;
+            const rect = { x: other.x, y: other.y, w: PS, h: PS };
+            if (!W.rectsIntersect(rect, inflated)) continue;
+            if (!this._canEnter(other, room) || W.wallsBlock(slot, rect)) {
+                const change = this._eject(other, slot);
+                moved.push(other);
+                if (change) membership.push(change);
+            } else if (other.slotId === slot.id && other.roomId !== slot.id) {
+                membership.push({ player: other, from: other.roomId, to: slot.id });
+                other.roomId = slot.id;
+            }
+        }
+        return { moved, membership };
+    }
+
+    createRoom(p, { slotId, name, password, color, topic }) {
         const slot = this.slotsById.get(slotId);
         if (!slot || slot.type !== 'conference') return { ok: false, error: 'invalid-slot' };
         if (this.rooms.has(slotId)) return { ok: false, error: 'slot-taken' };
@@ -195,48 +278,125 @@ class World extends EventEmitter {
         const pass = typeof password === 'string' ? password.slice(0, 20) : '';
         const room = this._newRoom({
             id: slotId, name: roomName, owner: p.id, ownerToken: p.token,
-            color: Object.prototype.hasOwnProperty.call(W.ROOM_COLORS, color) ? color : 'blue',
+            color: hasColor(color) ? color : 'blue',
+            topic: cleanText(topic, 80),
             passwordRecord: pass ? hashPassword(pass) : null
         });
-        this.rooms.set(slotId, room);
         p.unlocked.add(room.uid);
 
         // The owner appears in the middle of the new room.
-        const moved = [p];
         p.x = slot.x + slot.w / 2 - PS / 2;
         p.y = slot.y + slot.h / 2 - PS / 2;
-
-        // Anybody else standing there must either be allowed in or is pushed out through the door.
-        const membership = [{ player: p, from: null, to: slotId }];
-        const door = { x: W.doorStart(slot) + C.DOOR_SIZE / 2 - PS / 2, y: slot.y + slot.h + 24 };
-        const inflated = { x: slot.x - PS, y: slot.y - PS, w: slot.w + PS * 2, h: slot.h + PS * 2 };
-        for (const other of this.players.values()) {
-            if (other === p) continue;
-            const rect = { x: other.x, y: other.y, w: PS, h: PS };
-            if (!W.rectsIntersect(rect, inflated)) continue;
-            if (!this._canEnter(other, room) || W.wallsBlock(slot, rect)) {
-                other.x = door.x; other.y = door.y;
-                moved.push(other);
-                if (other.slotId === slotId) {
-                    this.occupancy.get(slotId).delete(other.id);
-                    other.slotId = null;
-                }
-                if (other.roomId === slotId) other.roomId = null;
-            } else if (other.slotId === slotId) {
-                other.roomId = slotId;
-                membership.push({ player: other, from: null, to: slotId });
-            }
-        }
-        p.roomId = slotId; // slotId is already tracked for the owner
-        return { ok: true, room, moved, membership };
+        const res = this._install(room, slot, p);
+        res.moved.unshift(p);
+        res.membership.unshift({ player: p, from: p.roomId, to: slotId });
+        p.roomId = slotId; // the owner's slot is already tracked (they were standing on it)
+        return { ok: true, room, moved: res.moved, membership: res.membership };
     }
 
     checkPassword(p, slotId, password) {
         const room = this.rooms.get(slotId);
         if (!room || !room.password || typeof password !== 'string') return false;
+        const ban = room.banned.get(p.token);
+        if (ban && ban > this.now()) return false;
         if (!verifyPassword(password, room.password)) return false;
         p.unlocked.add(room.uid);
         return true;
+    }
+
+    _ownedRoom(p, slotId) {
+        const room = this.rooms.get(slotId);
+        if (!room || room.builtin || room.permanent) return null;
+        return room.owner === p.id ? room : null;
+    }
+
+    /** Owner edits: name, colour, topic, password (set or clear). */
+    updateRoom(p, slotId, { name, color, topic, password, clearPassword } = {}) {
+        const room = this._ownedRoom(p, slotId);
+        if (!room) return { ok: false, error: 'not-owner' };
+        if (name !== undefined) {
+            const n = cleanText(name, 20);
+            if (!n) return { ok: false, error: 'invalid-name' };
+            room.name = n;
+        }
+        if (color !== undefined && hasColor(color)) room.color = color;
+        if (topic !== undefined) room.topic = cleanText(topic, 80);
+        if (clearPassword) room.password = null;
+        else if (typeof password === 'string' && password) {
+            room.password = hashPassword(password.slice(0, 20));
+            // A new password locks out everybody who only knew the old one, but not the people inside.
+            room.uid = crypto.randomBytes(8).toString('hex');
+            for (const id of this.occupancy.get(slotId)) { const o = this.players.get(id); if (o) o.unlocked.add(room.uid); }
+            p.unlocked.add(room.uid);
+        }
+        return { ok: true, room };
+    }
+
+    /** The owner removes someone from their room (and keeps them out for a while). */
+    kickFromRoom(p, slotId, targetId) {
+        const room = this._ownedRoom(p, slotId);
+        if (!room) return { ok: false, error: 'not-owner' };
+        const target = this.players.get(targetId);
+        if (!target || target === p || target.slotId !== slotId) return { ok: false, error: 'not-in-room' };
+        room.banned.set(target.token, this.now() + ROOM_KICK_BAN_MS);
+        target.unlocked.delete(room.uid);
+        const change = this._eject(target, this.slotsById.get(slotId));
+        return { ok: true, target, change };
+    }
+
+    // ------------------------------------------------------- admin / permanent
+
+    /** Admin: create (or replace) a room that never disappears. */
+    createPermanentRoom({ slotId, name, color, topic, password, passwordRecord }) {
+        const slot = this.slotsById.get(slotId);
+        if (!slot || slot.type !== 'conference') return { ok: false, error: 'invalid-slot' };
+        const roomName = cleanText(name, 20);
+        if (!roomName) return { ok: false, error: 'invalid-name' };
+        const old = this.rooms.get(slotId);
+        const room = this._newRoom({
+            id: slotId, name: roomName, owner: null, color: hasColor(color) ? color : 'indigo', permanent: true,
+            topic: cleanText(topic, 80),
+            passwordRecord: passwordRecord || (typeof password === 'string' && password ? hashPassword(password.slice(0, 20)) : null)
+        });
+        if (old) { room.whiteboard = old.whiteboard; room.note = old.note; room.chat = old.chat; }
+        const res = this._install(room, slot);
+        return { ok: true, room, replaced: !!old, ...res };
+    }
+
+    /** Admin: remove any non built-in room, sending its occupants out through the door. */
+    closeRoom(slotId) {
+        const room = this.rooms.get(slotId);
+        if (!room || room.builtin) return { ok: false, error: 'not-found' };
+        const slot = this.slotsById.get(slotId);
+        const moved = [], membership = [];
+        for (const id of Array.from(this.occupancy.get(slotId))) {
+            const p = this.players.get(id);
+            if (!p) continue;
+            const change = this._eject(p, slot);
+            moved.push(p);
+            if (change) membership.push(change);
+        }
+        this.rooms.delete(slotId);
+        return { ok: true, moved, membership };
+    }
+
+    permanentRooms() {
+        return Array.from(this.rooms.values()).filter(r => r.permanent).map(r => ({
+            slotId: r.id, name: r.name, color: r.color, topic: r.topic,
+            password: r.password ? { salt: r.password.salt.toString('base64'), hash: r.password.hash.toString('base64') } : null,
+            whiteboard: r.whiteboard, note: r.note
+        }));
+    }
+
+    loadPermanentRooms(list) {
+        if (!Array.isArray(list)) return;
+        for (const r of list) {
+            const rec = r.password && r.password.salt ? { salt: Buffer.from(r.password.salt, 'base64'), hash: Buffer.from(r.password.hash, 'base64') } : null;
+            const res = this.createPermanentRoom({ slotId: r.slotId, name: r.name, color: r.color, topic: r.topic, passwordRecord: rec });
+            if (!res.ok) continue;
+            if (Array.isArray(r.whiteboard)) res.room.whiteboard = r.whiteboard.slice(-MAX_WB_BATCHES);
+            if (r.note && typeof r.note.text === 'string') res.room.note = { text: r.note.text.slice(0, 5000), rev: 0 };
+        }
     }
 
     // --------------------------------------------------------------- movement
@@ -297,20 +457,84 @@ class World extends EventEmitter {
         if (room) room.expiresAt = null;
         const roomId = room && this._canEnter(p, room) ? room.id : null;
         if (roomId !== p.roomId) {
+            const prevRoom = p.roomId ? this.rooms.get(p.roomId) : null;
+            if (prevRoom) this.lowerHand(prevRoom, p.id);
             result.membership = { from: p.roomId, to: roomId };
             p.roomId = roomId;
         }
         return result;
     }
 
-    // ------------------------------------------------------------- whiteboard
+    // ------------------------------------------------------------ room tools
 
     addStroke(room, batch) {
         room.whiteboard.push(batch);
         if (room.whiteboard.length > MAX_WB_BATCHES) room.whiteboard.shift();
     }
 
-    // -------------------------------------------------------------------- misc
+    pushChat(room, msg) {
+        const list = room ? room.chat : this.publicChat;
+        list.push(msg);
+        if (list.length > CHAT_HISTORY) list.shift();
+    }
+
+    lowerHand(room, id) {
+        const i = room.hands.findIndex(h => h.id === id);
+        if (i < 0) return false;
+        room.hands.splice(i, 1);
+        return true;
+    }
+
+    raiseHand(room, p) {
+        if (room.hands.some(h => h.id === p.id)) return false;
+        room.hands.push({ id: p.id, name: p.nickname, at: this.now() });
+        return true;
+    }
+
+    createPoll(room, p, question, options) {
+        const q = cleanText(question, 120);
+        const opts = Array.isArray(options) ? options.map(o => cleanText(o, 60)).filter(Boolean).slice(0, 6) : [];
+        if (!q || opts.length < 2) return { ok: false, error: 'invalid-poll' };
+        if (room.poll && !room.poll.closed && room.poll.by !== p.id && room.owner !== p.id) return { ok: false, error: 'poll-running' };
+        room.poll = { id: crypto.randomBytes(6).toString('hex'), question: q, options: opts, votes: new Map(), by: p.id, byName: p.nickname, closed: false };
+        return { ok: true };
+    }
+
+    vote(room, p, pollId, option) {
+        const poll = room.poll;
+        if (!poll || poll.closed || poll.id !== pollId) return false;
+        if (!Number.isInteger(option) || option < 0 || option >= poll.options.length) return false;
+        poll.votes.set(p.token, option);
+        return true;
+    }
+
+    closePoll(room, p, pollId) {
+        const poll = room.poll;
+        if (!poll || poll.id !== pollId || poll.closed) return false;
+        if (poll.by !== p.id && room.owner !== p.id) return false;
+        poll.closed = true;
+        return true;
+    }
+
+    publicPoll(room) {
+        const poll = room.poll;
+        if (!poll) return null;
+        const counts = poll.options.map(() => 0);
+        for (const v of poll.votes.values()) counts[v]++;
+        return { id: poll.id, question: poll.question, options: poll.options, counts, total: poll.votes.size, closed: poll.closed, byName: poll.byName };
+    }
+
+    startTimer(room, p, seconds, label) {
+        const s = Math.round(Number(seconds));
+        if (!Number.isFinite(s) || s < 5 || s > 4 * 3600) return false;
+        room.timer = { endsAt: this.now() + s * 1000, total: s * 1000, label: cleanText(label, 40), byName: p.nickname };
+        return true;
+    }
+
+    publicTimer(room) {
+        if (!room.timer) return null;
+        return { remainingMs: Math.max(0, room.timer.endsAt - this.now()), totalMs: room.timer.total, label: room.timer.label, byName: room.timer.byName };
+    }
 
     /** Snapshot sent to a player that enters a room (late joiners catch up). */
     roomSnapshot(room) {
@@ -318,9 +542,13 @@ class World extends EventEmitter {
             roomId: room.id,
             whiteboard: room.whiteboard,
             note: room.note,
-            music: room.music.snapshot()
+            music: room.music.snapshot(),
+            chat: room.chat,
+            poll: this.publicPoll(room),
+            hands: room.hands,
+            timer: this.publicTimer(room)
         };
     }
 }
 
-module.exports = { World, MAX_ROOMS_PER_OWNER };
+module.exports = { World, MAX_ROOMS_PER_OWNER, ROOM_KICK_BAN_MS };

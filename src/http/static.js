@@ -159,4 +159,14 @@ class StaticFiles {
     }
 }
 
-module.exports = { StaticFiles, safeJoin, parseRange, mimeOf };
+/** Streams one file (with Range support), e.g. a music track. */
+function sendFile(req, res, file, headers = {}) {
+    let stat;
+    try { stat = fs.statSync(file); } catch (_) { return false; }
+    if (!stat.isFile()) return false;
+    return StaticFiles.prototype.stream.call(null, req, res, file, stat, {
+        'Content-Type': mimeOf(file), 'Accept-Ranges': 'bytes', 'Cache-Control': 'private, max-age=3600', ...headers
+    });
+}
+
+module.exports = { StaticFiles, safeJoin, parseRange, mimeOf, sendFile };

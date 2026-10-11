@@ -55,6 +55,14 @@ class RateLimiter {
         return true;
     }
 
+    /** Number of events recorded for (id, action) inside the window, without recording a new one. */
+    count(id, action, windowMs) {
+        const stamps = this.buckets.get(`${id}:${action}`);
+        if (!stamps) return 0;
+        const t = this.now();
+        return stamps.filter(s => s > t - windowMs).length;
+    }
+
     forget(id) {
         const prefix = `${id}:`;
         for (const key of this.buckets.keys()) if (key.startsWith(prefix)) this.buckets.delete(key);

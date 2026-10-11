@@ -17,9 +17,11 @@ server.on('error', err => {
 });
 
 server.listen(config.PORT, config.HOST, () => {
-    const proto = server.cert || config.TLS_CERT || config.TLS_SELF_SIGNED ? 'https' : 'http';
-    log.info(`${config.SERVER_NAME} is running`, { url: `${proto}://localhost:${config.PORT}` });
-    if (app.onListening) app.onListening();
+    const base = `${app.secure ? 'https' : 'http'}://localhost:${config.PORT}`;
+    log.info(`${config.SERVER_NAME} ${app.version} is running`, { url: base });
+    log.info('admin panel', { url: `${base}/admin` });
+    if (app.secretsCreated && !app.adminTokenFromEnv) log.info(`admin token (shown once, also stored in ${config.DATA_DIR}/secrets.json)`, { token: app.adminToken });
+    else if (!app.adminTokenFromEnv) log.info(`admin token is stored in ${config.DATA_DIR}/secrets.json`);
 });
 
 let closing = false;
