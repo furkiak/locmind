@@ -14,6 +14,8 @@ const { Hub, clientIp } = require('./net/hub');
 const { World } = require('./world');
 const { createGame } = require('./game');
 const { YouTubeService } = require('./youtube');
+const { Store } = require('./store');
+const { TurnServer } = require('./turn/server');
 
 const ROOT = path.join(__dirname, '..');
 const PUBLIC_DIR = path.join(ROOT, 'public');
@@ -31,6 +33,12 @@ function listEmojis() {
 function createApp(overrides = {}, baseConfig = null) {
     const cfg = { ...(baseConfig || loadConfig({ argv: [], env: process.env })), ...overrides };
     const log = overrides.logger || createLogger({ level: cfg.LOG_LEVEL, format: cfg.LOG_FORMAT || undefined });
+
+    const store = overrides.store || new Store(cfg.DATA_DIR, { log });
+    const secrets = store.secrets();
+    const turnSecret = cfg.TURN_SECRET || secrets.turnSecret;
+    const adminToken = cfg.ADMIN_TOKEN || secrets.adminToken;
+    const tlsMaterial = overrides.tls || (cfg.TLS_CERT && cfg.TLS_KEY ? { cert: fs.readFileSync(cfg.TLS_CERT), key: fs.readFileSync(cfg.TLS_KEY) } : null);
 
     const router = new Router();
     const statics = new StaticFiles([
@@ -55,9 +63,7 @@ function createApp(overrides = {}, baseConfig = null) {
         }
     };
 
-    const server = cfg.TLS_CERT && cfg.TLS_KEY
-        ? https.createServer({ cert: fs.readFileSync(cfg.TLS_CERT), key: fs.readFileSync(cfg.TLS_KEY) }, handler)
-        : (overrides.tls ? https.createServer(overrides.tls, handler) : http.createServer(handler));
+    const server = tlsMaterial ? https.createServer(tlsMaterial, handler) : http.createServer(handler);
     // Slow-loris and idle-connection protection.
     server.headersTimeout = 20000;
     server.requestTimeout = 120000;
@@ -85,6 +91,34 @@ function createApp(overrides = {}, baseConfig = null) {
         return [...iceProviders.flatMap(fn => fn(client, player)), ...iceExtras];
     };
 
+    // Built-in STUN/TURN: voice and video work behind NATs and firewalls without any third party.
+    let turn = null;
+    const turnReady = (async () => {
+        if (!cfg.TURN) return;
+        const t = new TurnServer({
+            port: cfg.TURN_PORT, host: cfg.HOST === '::' ? '0.0.0.0' : cfg.HOST, publicIp: cfg.TURN_PUBLIC_IP, secret: turnSecret,
+            relayMin: cfg.TURN_RELAY_MIN, relayMax: cfg.TURN_RELAY_MAX, allowPrivatePeers: cfg.TURN_ALLOW_PRIVATE_PEERS,
+            maxAllocationsPerIp: cfg.TURN_MAX_ALLOCATIONS_PER_IP, bandwidthBps: cfg.TURN_BANDWIDTH_BPS, log,
+            tlsOptions: tlsMaterial, tlsPort: cfg.TURN_TLS_PORT
+        });
+        try {
+            await t.start();
+            turn = t;
+            log.info('STUN/TURN relay ready', { port: t.port, tls: t.tls ? t.tlsPort : 'off', relayIp: t.publicIp, relayPorts: `${t.relayMin}-${t.relayMax}` });
+        } catch (err) {
+            log.warn(`STUN/TURN could not start (${err.message}); voice still works on simple networks`);
+        }
+    })();
+    iceProviders.push((client, player) => {
+        if (!turn) return [];
+        const host = cfg.TURN_HOST || client.host || turn.publicIp;
+        const h = host.includes(':') ? `[${host}]` : host;
+        const { username, credential } = turn.credentials(player.id);
+        const urls = [`stun:${h}:${turn.port}`, `turn:${h}:${turn.port}?transport=udp`, `turn:${h}:${turn.port}?transport=tcp`];
+        if (turn.tls) urls.push(`turns:${h}:${turn.tlsPort}?transport=tcp`);
+        return [{ urls, username, credential }];
+    });
+
     const game = createGame(hub, { world, youtube, config: cfg, emojiFiles: listEmojis(), limiter: new RateLimiter(), iceServersFor });
 
     // ------------------------------------------------------------------ routes
@@ -98,7 +132,8 @@ function createApp(overrides = {}, baseConfig = null) {
             youtube: cfg.YOUTUBE,
             search: cfg.YOUTUBE && cfg.INVIDIOUS_INSTANCES.length > 0,
             afkLimitMs: cfg.AFK_LIMIT_MS,
-            afkGraceMs: cfg.AFK_GRACE_MS
+            afkGraceMs: cfg.AFK_GRACE_MS,
+            turn: turn ? { port: turn.port, tls: turn.tls ? turn.tlsPort : null } : null
         });
     });
 
@@ -114,17 +149,23 @@ function createApp(overrides = {}, baseConfig = null) {
         catch (_) { sendJson(res, 503, { error: 'search-unavailable' }); }
     });
 
-    function close() {
+    async function close() {
         game.stop();
         clearInterval(searchSweep);
         hub.close();
-        return new Promise(resolve => {
+        await turnReady;
+        if (turn) await turn.close();
+        store.flush();
+        await new Promise(resolve => {
             server.close(() => resolve());
             if (server.closeAllConnections) server.closeAllConnections();
         });
     }
 
-    return { server, hub, io: hub, world, game, router, close, config: cfg, log, iceProviders };
+    return {
+        server, hub, io: hub, world, game, router, close, config: cfg, log, store, iceProviders,
+        ready: turnReady, get turn() { return turn; }, adminToken
+    };
 }
 
 module.exports = { createApp };

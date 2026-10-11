@@ -5,7 +5,7 @@ import { byId, $$ } from './dom.js';
 import { hydrateIcons } from './icons.js';
 import { initAudio, startMic, toggleMute, updateSpatial, updateSpeaking, isSpeaking, shutdownAudio, hasVoice } from './audio.js';
 import { initNet, joinWorld, send } from './net.js';
-import { updateLinks, closeAllLinks, linkedIds } from './rtc.js';
+import { updateLinks, closeAllLinks, linkedIds, linkStats } from './rtc.js';
 import { initInput } from './input.js';
 import { startRender, preloadAvatars } from './render.js';
 import {
@@ -21,7 +21,7 @@ import { initSettings, openSettings } from './settings.js';
 import { kick, refreshZone, input } from './movement.js';
 import { play } from './sfx.js';
 
-window.__locmind = { S, bus, linkedIds, hasVoice, input };   // handy for debugging and the end-to-end tests
+window.__locmind = { S, bus, linkedIds, linkStats, hasVoice, input };   // handy for debugging and the end-to-end tests
 
 // -------------------------------------------------------------- actions
 

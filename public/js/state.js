@@ -41,6 +41,8 @@ export const S = {
     userVolumes: {},
     needsRedraw: true,
     resume: null,
+    // ?relay=1 forces every call through the TURN relay (handy to test firewalled networks)
+    forceRelay: new URLSearchParams(location.search).has('relay'),
     locate: null
 };
 

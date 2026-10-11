@@ -19,6 +19,13 @@ const VOLATILE_SKIP_BYTES = 128 * 1024;      // volatile messages are skipped ab
 
 const encode = (event, payload) => textFrame(JSON.stringify([event, payload === undefined ? null : payload]));
 
+/** Hostname part of a Host header (keeps IPv6 brackets off), '' when missing or odd. */
+function hostOnly(h) {
+    const v = String(h || '');
+    const m = /^\[([0-9a-fA-F:.]+)\](?::\d+)?$/.exec(v) || /^([A-Za-z0-9.-]+)(?::\d+)?$/.exec(v);
+    return m ? m[1] : '';
+}
+
 function clientIp(req, trustProxy) {
     let ip = req.socket.remoteAddress || '';
     if (trustProxy) {
@@ -35,6 +42,7 @@ class Client {
         this.conn = conn;
         this.ip = ip;
         this.userAgent = String(req.headers['user-agent'] || '').slice(0, 200);
+        this.host = hostOnly(req.headers.host);
         this.connectedAt = Date.now();
         this.rooms = new Set();
         this.handlers = new Map();
@@ -233,4 +241,4 @@ class Hub {
     }
 }
 
-module.exports = { Hub, clientIp };
+module.exports = { Hub, clientIp, hostOnly };

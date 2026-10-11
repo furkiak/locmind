@@ -4,15 +4,17 @@ const assert = require('node:assert/strict');
 const { connect } = require('../src/net/client');
 const { createApp } = require('../src/app');
 const W = require('../shared/world');
+const { tmpDir } = require('./helpers');
 
 const { C } = W;
 
-async function boot() {
+async function boot(extra = {}) {
     const fakeFetch = async url => ({
         ok: true,
         json: async () => ({ title: `Title of ${String(url).slice(-11)}` })
     });
-    const ctx = createApp({ fetchImpl: fakeFetch, LOG_LEVEL: 'silent', MAX_CONNECTIONS_PER_IP: 1000 });
+    const ctx = createApp({ fetchImpl: fakeFetch, LOG_LEVEL: 'silent', MAX_CONNECTIONS_PER_IP: 1000, TURN: false, DATA_DIR: tmpDir(), ...extra });
+    await ctx.ready;
     await new Promise(r => ctx.server.listen(0, '127.0.0.1', r));
     ctx.url = `http://127.0.0.1:${ctx.server.address().port}`;
     return ctx;
@@ -315,6 +317,21 @@ test('reconnect resumes the previous session (position, unlocks) and replaces a 
     const res2 = await stranger.call('join', { nickname: 'Eve', resume: 'deadbeef' });
     assert.equal(res2.ok, true);
     assert.deepEqual(res2.unlocked, []);
+});
+
+test('built-in TURN: join answer carries per-player, verifiable credentials', async t => {
+    const relay = 52000 + Math.floor(Math.random() * 5000);
+    const ctx = await boot({ TURN: true, TURN_PORT: 0, TURN_PUBLIC_IP: '127.0.0.1', TURN_RELAY_MIN: relay, TURN_RELAY_MAX: relay + 20 });
+    const a = await join(ctx, 'Relay');
+    t.after(async () => { a.close(); await ctx.close(); });
+    const ice = a.me.iceServers;
+    assert.equal(ice.length, 1);
+    assert.ok(ice[0].urls.some(u => u.startsWith('turn:127.0.0.1:') && u.endsWith('transport=udp')));
+    assert.ok(ice[0].urls.some(u => u.startsWith('stun:')));
+    assert.match(ice[0].username, new RegExp(`^\\d+:${a.id}$`));
+    assert.equal(ice[0].credential, ctx.turn.passwordFor(ice[0].username));
+    const cfg = await (await fetch(ctx.url + '/api/config')).json();
+    assert.equal(cfg.turn.port, ctx.turn.port);
 });
 
 test('http endpoints and headers', async t => {

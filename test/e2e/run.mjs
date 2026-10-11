@@ -27,7 +27,10 @@ if (!chromium || !exe) {
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const ctx = createApp({ LOG_LEVEL: 'silent', MAX_CONNECTIONS_PER_IP: 1000 });
+const os = require('os');
+const relayBase = 53000 + Math.floor(Math.random() * 5000);
+const ctx = createApp({ LOG_LEVEL: 'silent', MAX_CONNECTIONS_PER_IP: 1000, DATA_DIR: fs.mkdtempSync(os.tmpdir() + '/locmind-e2e-'), TURN: true, TURN_PORT: 0, TURN_PUBLIC_IP: '127.0.0.1', TURN_RELAY_MIN: relayBase, TURN_RELAY_MAX: relayBase + 40 });
+await ctx.ready;
 await new Promise(r => ctx.server.listen(0, '127.0.0.1', r));
 const URL = `http://127.0.0.1:${ctx.server.address().port}/`;
 const browser = await chromium.launch({
@@ -36,7 +39,7 @@ const browser = await chromium.launch({
 });
 
 const problems = [];
-async function player(nick, { avatar = 'usr1.png', scheme = 'dark', width = 1280, height = 800 } = {}) {
+async function player(nick, { avatar = 'usr1.png', scheme = 'dark', width = 1280, height = 800, query = '' } = {}) {
     const context = await browser.newContext({ viewport: { width, height }, colorScheme: scheme, locale: 'en-US', permissions: ['microphone', 'camera'] });
     const page = await context.newPage();
     page.on('pageerror', e => problems.push(`[${nick}] pageerror: ${e.message}`));
@@ -44,7 +47,7 @@ async function player(nick, { avatar = 'usr1.png', scheme = 'dark', width = 1280
         const text = m.text();
         if (m.type() === 'error' && !/youtube|ytimg|ERR_TUNNEL|ERR_NAME_NOT_RESOLVED|ERR_INTERNET_DISCONNECTED|Failed to load resource/i.test(text)) problems.push(`[${nick}] console.error: ${text}`);
     });
-    await page.goto(URL);
+    await page.goto(URL + query);
     await page.fill('#nick', nick);
     await page.click(`#avatars [data-avatar="${avatar}"]`);
     await page.check('#tos', { force: true });
@@ -183,6 +186,24 @@ try {
         await a.fill('#music-input', 'https://youtu.be/dQw4w9WgXcQ');
         await a.keyboard.press('Enter');
         await b.waitForFunction(() => document.getElementById('music-title').textContent.includes('dQw4w9WgXcQ') || document.getElementById('music-title').textContent.length > 3, null, { timeout: 8000 });
+    });
+
+    await check('built-in TURN: two forced-relay players talk through the relay', async () => {
+        const r1 = await player('Relay1', { query: '?relay=1' });
+        const r2 = await player('Relay2', { query: '?relay=1' });
+        // down the free corridor on the left, then across empty plots (no walls on the way)
+        await Promise.all([walkTo(r1, 60, 1020), walkTo(r2, 60, 1080)]);
+        await Promise.all([walkTo(r1, 2000, 1020), walkTo(r2, 2060, 1080)]);
+        await r1.waitForFunction(() => window.__locmind.linkedIds().size >= 1, null, { timeout: 20000 });
+        const stats = await r1.waitForFunction(async () => {
+            const rows = await window.__locmind.linkStats();
+            const a = rows.find(r => r.channel === 'audio' && r.state === 'connected');
+            return a && a.local ? a : null;
+        }, null, { timeout: 20000, polling: 500 });
+        const row = await stats.jsonValue();
+        assert.equal(row.local, 'relay', JSON.stringify(row));
+        assert.ok(ctx.turn.stats.packetsRelayed > 0, 'audio packets went through our relay');
+        await r1.context().close(); await r2.context().close();
     });
 
     await check('mobile layout: joystick visible, dock fits, no horizontal overflow', async () => {
