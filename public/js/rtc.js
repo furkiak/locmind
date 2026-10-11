@@ -2,7 +2,7 @@
 //   audio  : both ways, created for everybody in earshot
 //   camera : one way (owner -> viewers in earshot)
 //   screen : one way (owner -> everybody in the same room)
-import { S, C, bus, roomIdOf } from './state.js';
+import { S, bus, roomIdOf, voiceRelation } from './state.js';
 import { attachVoice, detachVoice, sendStream } from './audio.js';
 import { play } from './sfx.js';
 
@@ -132,9 +132,7 @@ export async function handleSignal({ from, channel, type, lid, data }) {
 }
 
 export function wantsVoice(me, p, linked) {
-    const myRoom = S.currentRoomId, theirRoom = roomIdOf(p);
-    if (myRoom || theirRoom) return myRoom === theirRoom;
-    return Math.hypot(me.x - p.x, me.y - p.y) < (linked ? C.HEAR_LINK_DISTANCE : C.HEAR_DISTANCE);
+    return voiceRelation(me, p, linked).link;
 }
 
 function canRetry(k) {

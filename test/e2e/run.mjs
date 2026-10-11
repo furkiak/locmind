@@ -15,7 +15,7 @@ try { ({ chromium } = await import('playwright-core')); } catch (_) { /* optiona
 
 const candidates = [
     process.env.CHROMIUM_PATH,
-    '/opt/pw-browsers/chromium/chrome-linux/chrome',
+    '/opt/pw-browsers/chromium/chrome-linux/chrome', '/opt/pw-browsers/chromium',
     '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome',
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 ].filter(Boolean);
@@ -29,7 +29,19 @@ if (!chromium || !exe) {
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const os = require('os');
 const relayBase = 53000 + Math.floor(Math.random() * 5000);
-const ctx = createApp({ LOG_LEVEL: 'silent', MAX_CONNECTIONS_PER_IP: 1000, DATA_DIR: fs.mkdtempSync(os.tmpdir() + '/locmind-e2e-'), TURN: true, TURN_PORT: 0, TURN_PUBLIC_IP: '127.0.0.1', TURN_RELAY_MIN: relayBase, TURN_RELAY_MAX: relayBase + 40 });
+const tmp = fs.mkdtempSync(os.tmpdir() + '/locmind-e2e-');
+fs.mkdirSync(tmp + '/media/music', { recursive: true });
+// a two second 440 Hz tone so the self-hosted library has something real to play
+function toneWav(seconds = 2, rate = 8000) {
+    const n = seconds * rate, buf = Buffer.alloc(44 + n * 2);
+    buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 2, 4); buf.write('WAVE', 8); buf.write('fmt ', 12);
+    buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22); buf.writeUInt32LE(rate, 24); buf.writeUInt32LE(rate * 2, 28);
+    buf.writeUInt16LE(2, 32); buf.writeUInt16LE(16, 34); buf.write('data', 36); buf.writeUInt32LE(n * 2, 40);
+    for (let i = 0; i < n; i++) buf.writeInt16LE(Math.round(Math.sin(2 * Math.PI * 440 * i / rate) * 8000), 44 + i * 2);
+    return buf;
+}
+fs.writeFileSync(tmp + '/media/music/Test Tone.wav', toneWav());
+const ctx = createApp({ LOG_LEVEL: 'silent', MAX_CONNECTIONS_PER_IP: 1000, DATA_DIR: tmp + '/data', MEDIA_DIR: tmp + '/media', ADMIN_TOKEN: 'e2e-admin-token', TURN: true, TURN_PORT: 0, TURN_PUBLIC_IP: '127.0.0.1', TURN_RELAY_MIN: relayBase, TURN_RELAY_MAX: relayBase + 40 });
 await ctx.ready;
 await new Promise(r => ctx.server.listen(0, '127.0.0.1', r));
 const URL = `http://127.0.0.1:${ctx.server.address().port}/`;
@@ -181,11 +193,104 @@ try {
         await a.waitForFunction(() => window.__locmind.linkedIds().size === 1, null, { timeout: 15000 });
     });
 
-    await check('music queue is shared and ends in sync', async () => {
+    await check('music: the self-hosted library plays for everybody, YouTube stays available', async () => {
         await a.evaluate(() => window.__locmind.bus.emit('action', 'music'));
+        await a.waitForSelector('#library-list li .t');
+        assert.match(await a.textContent('#library-list li .t'), /Test Tone/);
+        await a.click('#library-list li');
+        await b.waitForFunction(() => document.getElementById('music-title').textContent.includes('Test Tone'), null, { timeout: 8000 });
+        await b.waitForFunction(() => document.getElementById('music-audio').src.includes('/media/music/'), null, { timeout: 8000 });
+        await a.click('#music-tabs [data-tab="youtube"]');
         await a.fill('#music-input', 'https://youtu.be/dQw4w9WgXcQ');
         await a.keyboard.press('Enter');
-        await b.waitForFunction(() => document.getElementById('music-title').textContent.includes('dQw4w9WgXcQ') || document.getElementById('music-title').textContent.length > 3, null, { timeout: 8000 });
+        await b.waitForFunction(() => document.querySelectorAll('#music-queue li:not(.empty)').length >= 1 || document.getElementById('music-title').textContent.includes('dQw4w9WgXcQ'), null, { timeout: 8000 });
+        await a.evaluate(() => window.__locmind.bus.emit('action', 'music'));
+    });
+
+    await check('profile: status and an emoji avatar show up for the other player', async () => {
+        const idA = await my(a, () => window.__locmind.S.myId);
+        await a.click('#statusbar');
+        await a.waitForSelector('#profile-pop:not([hidden])');
+        await a.click('#profile-pop .pp-status button:nth-child(2)');
+        await b.waitForFunction(id => window.__locmind.S.players[id].status === 'busy', idA);
+        await a.click('#profile-pop .avatar-custom');
+        await a.click('#profile-pop .maker-faces button:nth-child(6)');
+        await b.waitForFunction(id => window.__locmind.S.players[id].avatar.startsWith('e:🦊'), idA, { timeout: 6000 });
+        await a.keyboard.press('Escape');
+    });
+
+    await check('player card: direct message and wave', async () => {
+        const idB = await my(b, () => window.__locmind.S.myId);
+        await a.evaluate(id => window.__locmind.bus.emit('player-click', id), idB);
+        await a.waitForSelector('#player-card:not([hidden])');
+        await a.click('#player-card .card-act:nth-child(2)');
+        await b.waitForFunction(() => Array.from(document.querySelectorAll('.toast')).some(t => /waved|el salladı/.test(t.textContent)));
+        await a.click('#player-card .card-act:nth-child(1)');
+        await a.waitForSelector('#win-dm:not([hidden])');
+        await a.fill('#dm-input', 'psst <i>hi</i>');
+        await a.press('#dm-input', 'Enter');
+        await b.waitForFunction(() => Array.from(document.querySelectorAll('.toast')).some(t => t.textContent.includes('psst <i>hi</i>')));
+        await b.evaluate(() => window.__locmind.bus.emit('action', 'dm'));
+        await b.waitForFunction(() => document.querySelector('#dm-list li') && document.querySelector('#dm-list li').textContent.includes('psst <i>hi</i>'));
+        await a.evaluate(() => window.__locmind.bus.emit('action', 'dm'));
+        await b.evaluate(() => window.__locmind.bus.emit('action', 'dm'));
+    });
+
+    await check('room tools: raise hand, poll, timer and owner settings', async () => {
+        await b.keyboard.press('KeyY');
+        await a.waitForFunction(() => window.__locmind.S.room.hands.length === 1);
+        await a.keyboard.press('KeyO');
+        await a.waitForSelector('#win-room:not([hidden]) .rt-form');
+        const forms = a.locator('#room-body .rt-form');
+        await forms.nth(0).locator('input').first().fill('Ship on Friday?');
+        await forms.nth(0).locator('button[type=submit]').click();
+        await b.waitForFunction(() => window.__locmind.S.room.poll && window.__locmind.S.room.poll.question === 'Ship on Friday?');
+        await b.keyboard.press('KeyO');
+        await b.waitForSelector('#room-body .rt-opt');
+        await b.click('#room-body .rt-opt');
+        await a.waitForFunction(() => window.__locmind.S.room.poll.total === 1);
+        await a.click('#room-body .rt-sec:nth-of-type(3) .rt-row .btn');   // 1 minute preset
+        await b.waitForSelector('#timer-chip:not([hidden])');
+        const topic = a.locator('#room-body input[maxlength="80"]');
+        await topic.fill('Release planning');
+        await a.locator('#room-body .rt-sec:last-child button[type=submit]').click();
+        await b.waitForFunction(id => window.__locmind.S.rooms[id].topic === 'Release planning', slot.id);
+        await a.keyboard.press('Escape');
+        await a.evaluate(() => window.__locmind.bus.emit('action', 'roomtools'));
+        await b.evaluate(() => window.__locmind.bus.emit('action', 'roomtools'));
+    });
+
+    await check('admin panel: dashboard, announcement and kicking a player', async () => {
+        const z = await player('Zed', { avatar: 'usr4.png' });
+        const context = await browser.newContext({ viewport: { width: 1280, height: 860 }, locale: 'en-US' });
+        const admin = await context.newPage();
+        admin.on('pageerror', e => problems.push(`[admin] pageerror: ${e.message}`));
+        await admin.goto(URL + 'admin');
+        await admin.fill('#tokenInput', 'e2e-admin-token');
+        await admin.click('#loginForm button[type=submit]');
+        await admin.waitForSelector('#app:not([hidden])');
+        await admin.waitForFunction(() => document.getElementById('heroPlayers').textContent === '3');
+        await admin.fill('#announceInput', 'Pizza in the lobby');
+        await admin.click('#announceForm button');
+        await a.waitForSelector('#announce:not([hidden])');
+        assert.match(await a.textContent('#announce'), /Pizza in the lobby/);
+        await admin.click('.nav button[data-view=players]');
+        await admin.waitForSelector('#playersTable tbody tr');
+        const row = admin.locator('#playersTable tbody tr', { hasText: 'Zed' });
+        await row.locator('button', { hasText: 'Kick' }).click();
+        await admin.fill('#sheetBody input', 'Take a break');
+        await admin.click('#sheetOk');
+        await z.waitForSelector('#kicked:not([hidden])');
+        assert.match(await z.textContent('#kicked-text'), /Take a break/);
+        await context.close();
+        await z.context().close();
+    });
+
+    await check('path finding walks around walls into a room', async () => {
+        await b.evaluate(() => window.__locmind.walkTo(1500, 2700));
+        await b.waitForFunction(() => { const { S } = window.__locmind; const p = S.players[S.myId]; return Math.hypot(p.x - 1500, p.y - 2700) < 8; }, null, { timeout: 30000 });
+        await b.evaluate(id => { const s = window.__locmind.S.slotsById[id]; window.__locmind.walkTo(s.x + s.w / 2 - 20, s.y + s.h / 2 - 20); }, slot.id);
+        await b.waitForFunction(id => window.__locmind.S.currentRoomId === id, slot.id, { timeout: 30000 });
     });
 
     await check('built-in TURN: two forced-relay players talk through the relay', async () => {
@@ -226,5 +331,6 @@ try {
 if (problems.length) { console.error('Browser problems:\n' + problems.join('\n')); process.exitCode = 1; }
 await browser.close();
 await ctx.close();
+fs.rmSync(tmp, { recursive: true, force: true });
 console.log(process.exitCode ? 'e2e: FAILED' : 'e2e: all passed');
 process.exit(process.exitCode || 0);

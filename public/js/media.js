@@ -1,11 +1,12 @@
 // Camera and screen sharing (local capture + remote viewers).
-import { S, bus, me, redraw } from './state.js';
+import { S, bus, me, redraw, onStage } from './state.js';
 import { t } from './i18n.js';
 import { h, byId } from './dom.js';
 import { icon } from './icons.js';
 import { send } from './net.js';
 import { closeChannel } from './rtc.js';
-import { toast, updateDock, attachWindow } from './ui.js';
+import { toast, updateDock, attachWindow, isWindowOpen } from './ui.js';
+import { avatarEl } from './avatar.js';
 
 /** Tells everybody about my mic / camera / screen state (drives the badges). */
 export function syncStatus() {
@@ -51,6 +52,7 @@ export async function toggleCamera() {
         setVideo(S.myId, stream, true);
         syncStatus();
         updateDock();
+        renderGallery();
     } catch (err) {
         toast(String(err && err.message || err), { type: 'error', icon: 'video-off' });
     }
@@ -64,6 +66,7 @@ export function stopCamera() {
     dropVideo(S.myId);
     syncStatus();
     updateDock();
+    renderGallery();
 }
 
 bus.on('rtc:camera', ({ id, stream }) => setVideo(id, stream, false));
@@ -84,7 +87,8 @@ bus.on('player-status', p => {
 export async function toggleScreenShare() {
     if (S.screenStream) { stopScreenShare(); return; }
     const room = S.currentRoomId ? S.rooms[S.currentRoomId] : null;
-    if (!room || room.builtin) { toast(t('need_room'), { type: 'warn' }); return; }
+    const stage = room && room.type === 'auditorium' && onStage(me());
+    if (!room || (room.builtin && !stage)) { toast(t(room && room.type === 'auditorium' ? 'need_stage' : 'need_room'), { type: 'warn' }); return; }
     if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) { toast(t('mic_error_https'), { type: 'error' }); return; }
     try {
         const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 15, max: 30 } }, audio: false });
@@ -143,3 +147,39 @@ export function shutdownMedia() {
     Object.keys(S.videos).forEach(dropVideo);
     document.querySelectorAll('.screen-win').forEach(w => w.remove());
 }
+
+// ---------------------------------------------------------------- gallery
+
+/** Every camera in one window: the world view only shows small circles above the avatars. */
+export function renderGallery() {
+    if (!isWindowOpen('win-gallery')) return;
+    const grid = document.getElementById('gallery');
+    const ids = Object.keys(S.videos).sort((a, b) => (a === S.myId ? -1 : b === S.myId ? 1 : 0));
+    const have = new Map(Array.from(grid.children).map(el => [el.dataset.id, el]));
+    for (const [id, el] of have) if (!S.videos[id]) { const v = el.querySelector('video'); if (v) v.srcObject = null; el.remove(); }
+    for (const id of ids) {
+        const src = S.videos[id];
+        let tile = have.get(id);
+        if (!tile) {
+            const p = S.players[id];
+            const v = h('video', { autoplay: '', playsinline: '' });
+            v.muted = true;
+            tile = h('figure', { class: 'g-tile' + (id === S.myId ? ' is-me' : ''), dataset: { id } }, v,
+                h('figcaption', {}, p ? avatarEl(p.avatar, { size: 20 }) : null, h('span', {}, p ? p.nickname : '…')));
+            grid.append(tile);
+        }
+        const v = tile.querySelector('video');
+        if (v.srcObject !== src.srcObject) { v.srcObject = src.srcObject; v.play().catch(() => {}); }
+    }
+    grid.dataset.count = String(Math.min(ids.length, 9));
+    if (!ids.length && !grid.querySelector('.g-empty')) grid.append(h('p', { class: 'g-empty muted' }, t('gallery_empty')));
+    else if (ids.length) { const e = grid.querySelector('.g-empty'); if (e) e.remove(); }
+}
+bus.on('rtc:camera', () => setTimeout(renderGallery));
+bus.on('rtc:camera-end', () => setTimeout(renderGallery));
+bus.on('player-left', () => setTimeout(renderGallery));
+bus.on('win', ({ id, open }) => {
+    if (id !== 'win-gallery') return;
+    if (open) renderGallery();
+    else document.querySelectorAll('#gallery video').forEach(v => { v.srcObject = null; v.parentElement.remove(); });
+});

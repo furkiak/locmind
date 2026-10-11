@@ -1,27 +1,31 @@
 // Locmind client entry point: wires the modules together and runs the join flow.
 import { S, W, bus, me, setSetting } from './state.js';
 import { initI18n, t, applyI18n } from './i18n.js';
-import { byId, $$ } from './dom.js';
+import { byId } from './dom.js';
 import { hydrateIcons } from './icons.js';
-import { initAudio, startMic, toggleMute, updateSpatial, updateSpeaking, isSpeaking, shutdownAudio, hasVoice } from './audio.js';
+import { initAudio, startMic, toggleMute, updateSpatial, updateSpeaking, isSpeaking, shutdownAudio, hasVoice, setPushToTalk, micLevel } from './audio.js';
 import { initNet, joinWorld, send } from './net.js';
 import { updateLinks, closeAllLinks, linkedIds, linkStats } from './rtc.js';
 import { initInput } from './input.js';
 import { startRender, preloadAvatars } from './render.js';
 import {
     toast, errorToast, initModals, openModal, closeModal, currentModal, initWindows, hideWindow, toggleWindow, isWindowOpen,
-    initHud, buildDock, updateDock, updateStatus, updateZone, updateScore, celebrateGoal, setConnBanner, showKicked, initAfk, idleMs, touchActivity
+    initHud, buildDock, updateDock, updateStatus, updateZone, updateScore, celebrateGoal, setConnBanner, showKicked, initAfk, idleMs, touchActivity,
+    updateNet, updateMicMeter
 } from './ui.js';
+import { initSocial, openDm } from './social.js';
+import { initRoomTools, toggleHand, toggleRoomTools } from './roomtools.js';
 import { updatePeople, toggleRooms, toggleEmoji, openChat, closeChat, toggleChatLog, initChat } from './panels.js';
 import { toggleCamera, toggleScreenShare, syncStatus, shutdownMedia } from './media.js';
 import { initWhiteboard } from './whiteboard.js';
 import { initNotes } from './notes.js';
 import { initMusic } from './music.js';
 import { initSettings, openSettings } from './settings.js';
-import { kick, refreshZone, input } from './movement.js';
+import { buildAvatarMaker, initProfile, toggleProfile } from './profile.js';
+import { kick, refreshZone, input, walkTo } from './movement.js';
 import { play } from './sfx.js';
 
-window.__locmind = { S, bus, linkedIds, linkStats, hasVoice, input };   // handy for debugging and the end-to-end tests
+window.__locmind = { S, bus, linkedIds, linkStats, hasVoice, input, walkTo };   // handy for debugging and the end-to-end tests
 
 // -------------------------------------------------------------- actions
 
@@ -42,6 +46,8 @@ function closeTransient() {
     if (!byId('chatbar').hidden) { closeChat(); closed = true; }
     if (!byId('emoji-picker').hidden) { toggleEmoji(false); closed = true; }
     if (!byId('rooms-panel').hidden) { toggleRooms(false); closed = true; }
+    if (!byId('profile-pop').hidden) { toggleProfile(false); closed = true; }
+    if (!byId('player-card').hidden) { byId('player-card').hidden = true; closed = true; }
     return closed;
 }
 
@@ -63,6 +69,11 @@ const actions = {
     kick,
     rooms: () => toggleRooms(),
     settings: openSettings,
+    hand: toggleHand,
+    roomtools: toggleRoomTools,
+    profile: () => toggleProfile(),
+    gallery: () => toggleWindow('win-gallery'),
+    dm: () => (isWindowOpen('win-dm') ? hideWindow('win-dm') : openDm(null)),
     escape: () => {
         if (currentModal()) { if (byId('modal-layer').dataset.dismissible) closeModal(); return; }
         if (closeTransient()) return;
@@ -140,7 +151,30 @@ function waitForSocket(ms = 6000) {
     });
 }
 
-let selectedAvatar = S.settings.avatar || 'usr1.png';
+let selectedAvatar = W.validAvatar(S.settings.avatar) ? S.settings.avatar : 'usr1.png';
+
+const FALLBACK_CONFIG = { iceServers: [], youtube: false, afkLimitMs: 1800000, afkGraceMs: 45000 };
+async function loadConfig() {
+    try {
+        const res = await fetch('/api/config', { cache: 'no-store' });
+        if (!res.ok) throw new Error(String(res.status));
+        S.config = await res.json();
+    } catch (_) { S.config = S.config || { ...FALLBACK_CONFIG }; }
+    return S.config;
+}
+
+function showServerInfo(cfg) {
+    const info = byId('server-info');
+    const named = cfg.name && cfg.name !== 'Locmind';
+    byId('server-name').textContent = named ? cfg.name : '';
+    byId('server-name').hidden = !named;
+    byId('server-motd').textContent = cfg.motd || '';
+    byId('server-motd').hidden = !cfg.motd;
+    info.hidden = !named && !cfg.motd;
+    byId('server-pass-field').hidden = !cfg.passwordRequired;
+}
+
+const JOIN_ERRORS = { full: 'kicked_full', timeout: 'kicked_timeout', 'server-password': 'wrong_server_password', banned: 'kicked_banned', 'rate-limit': 'err_rate-limit' };
 
 async function enterWorld() {
     const nick = byId('nick').value.trim();
@@ -152,12 +186,18 @@ async function enterWorld() {
     const restore = () => { btn.disabled = false; btn.textContent = t('join'); };
 
     initAudio();   // must happen inside the click handler
-    try { S.config = await (await fetch('/api/config', { cache: 'no-store' })).json(); }
-    catch (_) { S.config = { iceServers: [], youtube: false, afkLimitMs: 1800000, afkGraceMs: 45000 }; }
+    showServerInfo(await loadConfig());
+    S.serverPassword = byId('server-pass').value;
+    if (S.config.passwordRequired && !S.serverPassword) { showLoginError('server_password_required'); byId('server-pass').focus(); restore(); return; }
 
     if (!(await waitForSocket())) { showLoginError('kicked_timeout'); restore(); return; }
     const res = await joinWorld(nick, selectedAvatar);
-    if (!res.ok) { showLoginError(res.error === 'full' ? 'kicked_full' : res.error === 'timeout' ? 'kicked_timeout' : 'kicked_error'); restore(); return; }
+    if (!res.ok) {
+        if (res.error === 'server-password') { byId('server-pass-field').hidden = false; byId('server-pass').select(); }
+        showLoginError(JOIN_ERRORS[res.error] || 'kicked_error');
+        restore();
+        return;
+    }
 
     setSetting('nick', nick); setSetting('avatar', selectedAvatar);
     S.active = true;
@@ -183,16 +223,14 @@ function shutdown() {
 
 function initLogin() {
     byId('nick').value = S.settings.nick || '';
-    const buttons = $$('#avatars .avatar');
-    const select = btn => {
-        buttons.forEach(b => { const on = b === btn; b.classList.toggle('is-selected', on); b.setAttribute('aria-checked', String(on)); });
-        selectedAvatar = btn.dataset.avatar;
-    };
-    buttons.forEach(b => b.addEventListener('click', () => select(b)));
-    select(buttons.find(b => b.dataset.avatar === selectedAvatar) || buttons[0]);
+    const picker = () => buildAvatarMaker(byId('avatars'), { value: selectedAvatar, onChange: v => { selectedAvatar = v; } });
+    picker();
+    bus.on('lang', () => { if (!S.active) picker(); });
+    loadConfig().then(showServerInfo);
 
     byId('join-btn').addEventListener('click', enterWorld);
     byId('nick').addEventListener('keydown', e => { if (e.key === 'Enter') enterWorld(); });
+    byId('server-pass').addEventListener('keydown', e => { if (e.key === 'Enter') enterWorld(); });
     byId('tos-link').addEventListener('click', e => { e.preventDefault(); openModal('modal-terms'); });
     byId('reload-btn').addEventListener('click', () => location.reload());
     byId('score-reset').addEventListener('click', () => send('score:reset', {}));
@@ -219,14 +257,24 @@ function wireEvents() {
         toast(t('reconnected'), { type: 'success' });
         syncStatus(); refreshZone(); updateStatus(); updateZone();
     });
-    bus.on('kicked', d => { shutdown(); showKicked(d && d.reason); });
+    bus.on('kicked', d => { shutdown(); showKicked(d && d.reason, d && d.message); });
     bus.on('lang', () => { applyI18n(); updateStatus(); updateZone(); });
     bus.on('canvas-press', () => { closeTransient(); });
     bus.on('heartbeat', () => send('heartbeat', {}));
+    bus.on('profile-open', () => toggleProfile(true));
+    bus.on('player-profile', p => { if (p && p.id === S.myId) updateStatus(); });
+    bus.on('rtt', updateNet);
+    bus.on('ptt', down => {
+        if (!S.settings.ptt || S.micState !== 'on' || S.muted) { if (!down) setPushToTalk(false); return; }
+        setPushToTalk(down);
+        touchActivity();
+    });
+    bus.on('room-updated', room => { if (room.id === S.currentRoomId) updateZone(); });
 
     initAfk(() => { shutdown(); showKicked('afk'); });
 
     // main logic tick: voice links, spatial audio, people panel
+    let wasOnStage = false;
     setInterval(() => {
         if (!S.active) return;
         const self = me();
@@ -237,12 +285,20 @@ function wireEvents() {
         updateLinks(self);
         updateSpatial(self);
         updatePeople();
+        updateMicMeter(micLevel());
+        const stage = S.currentRoomId === W.C.AUDITORIUM_ID && W.onStage(self.x, self.y);
+        if (stage !== wasOnStage) { wasOnStage = stage; updateZone(); }
     }, 150);
 
     setInterval(() => { if (S.active && S.connected && idleMs() < 60000) send('heartbeat', {}); }, 25000);
 
     // The dock buttons must not steal keyboard focus from the game.
     byId('dock').addEventListener('mousedown', e => { if (e.target.closest('.dock-btn')) e.preventDefault(); });
+}
+
+function registerServiceWorker() {
+    if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
+    window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => { /* offline shell is optional */ }));
 }
 
 function boot() {
@@ -257,12 +313,16 @@ function boot() {
     initNotes();
     initMusic();
     initRoomModals();
+    initSocial();
+    initRoomTools();
+    initProfile();
     preloadAvatars();
     initNet();
     initInput(byId('gameCanvas'));
     initLogin();
     wireEvents();
     startRender();
+    registerServiceWorker();
 }
 
 boot();

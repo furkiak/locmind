@@ -321,15 +321,21 @@ class World extends EventEmitter {
         }
         if (color !== undefined && hasColor(color)) room.color = color;
         if (topic !== undefined) room.topic = cleanText(topic, 80);
+        const lockedOut = [];
         if (clearPassword) room.password = null;
         else if (typeof password === 'string' && password) {
             room.password = hashPassword(password.slice(0, 20));
             // A new password locks out everybody who only knew the old one, but not the people inside.
+            const oldUid = room.uid, inside = this.occupancy.get(slotId);
             room.uid = crypto.randomBytes(8).toString('hex');
-            for (const id of this.occupancy.get(slotId)) { const o = this.players.get(id); if (o) o.unlocked.add(room.uid); }
+            for (const o of this.players.values()) {
+                if (!o.unlocked.delete(oldUid)) continue;
+                if (!inside.has(o.id) && o !== p) lockedOut.push(o.id);
+            }
+            for (const id of inside) { const o = this.players.get(id); if (o) o.unlocked.add(room.uid); }
             p.unlocked.add(room.uid);
         }
-        return { ok: true, room };
+        return { ok: true, room, lockedOut };
     }
 
     /** The owner removes someone from their room (and keeps them out for a while). */

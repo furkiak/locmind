@@ -26,6 +26,7 @@ module.exports = function rooms(ctx, client, on) {
         const res = world.updateRoom(p, d.slotId, d);
         if (!res.ok) return reply(res);
         ctx.roomChanged(res.room);
+        for (const id of res.lockedOut) { const sock = ctx.client(id); if (sock) sock.emit('room:relock', res.room.id); }
         reply({ ok: true });
     });
 

@@ -3,8 +3,36 @@
 import { S, W, C, bus, me, redraw, canEnter, slotOfPlayer } from './state.js';
 import { clamp, isTyping } from './dom.js';
 import { play } from './sfx.js';
+import { findPath } from './path.js';
 
-export const input = { keys: new Set(), joy: { x: 0, y: 0 }, target: null };
+export const input = { keys: new Set(), joy: { x: 0, y: 0 }, target: null, path: null };
+
+/** Walks to a world position (top-left coordinates), around walls when needed. */
+export function walkTo(x, y, { keepFollow = false } = {}) {
+    const p = me();
+    if (!p) return false;
+    if (!keepFollow) S.follow = null;
+    const path = findPath(p.x, p.y, x, y);
+    if (!path) return false;
+    input.path = path;
+    input.target = path.shift();
+    redraw();
+    return true;
+}
+
+export function stopWalking() { input.target = null; input.path = null; S.follow = null; }
+
+// following another player: re-plan twice a second while they move
+setInterval(() => {
+    if (!S.follow || !S.active) return;
+    const self = me(), o = S.players[S.follow];
+    if (!o) { S.follow = null; bus.emit('follow', null); return; }
+    const d = Math.hypot(o.x - self.x, o.y - self.y);
+    if (d > 90) {
+        const a = Math.atan2(self.y - o.y, self.x - o.x);
+        walkTo(o.x + Math.cos(a) * 60, o.y + Math.sin(a) * 60, { keepFollow: true });
+    }
+}, 500);
 
 const PS = C.PLAYER_SIZE;
 const SEND_EVERY_MS = 50;
@@ -66,7 +94,7 @@ export function kick() {
 export function step(dt) {
     const p = me();
     if (!p) return;
-    dt = Math.min(dt, .05);
+    dt = Math.min(dt, .1);   // a 30 px step at most: still thinner than a player plus a wall, so nothing is skipped
 
     let ax = 0, ay = 0;
     const locked = S.modalOpen || isTyping();
@@ -82,12 +110,13 @@ export function step(dt) {
     let speedScale = 1;
     const len = Math.hypot(ax, ay);
     if (len > 0) {
-        input.target = null;
+        if (input.target || S.follow) bus.emit('follow', null);
+        input.target = null; input.path = null; S.follow = null;
         if (len > 1) { ax /= len; ay /= len; }
         speedScale = Math.min(1, len);
     } else if (input.target && !locked) {
         const dx = input.target.x - p.x, dy = input.target.y - p.y, d = Math.hypot(dx, dy);
-        if (d < 3) input.target = null;
+        if (d < 3) input.target = input.path && input.path.length ? input.path.shift() : null;
         else { ax = dx / d; ay = dy / d; speedScale = Math.min(1, d / (C.SPEED * dt)); }
     }
 
@@ -107,7 +136,7 @@ export function step(dt) {
         const prevY = p.y;
         const okX = !blocked(nx, p.y, prevY);
         const okY = !blocked(okX ? nx : p.x, ny, prevY);
-        if ((mx !== 0 && !okX) || (my !== 0 && !okY)) input.target = null;
+        if ((mx !== 0 && !okX) || (my !== 0 && !okY)) { input.target = null; input.path = null; }
         if (okX) p.x = nx;
         if (okY) p.y = ny;
         p.rx = p.x; p.ry = p.y;

@@ -35,7 +35,17 @@ const P = {
     globe: '<circle cx="12" cy="12" r="9.5"/><path d="M2.5 12h19"/><path d="M12 2.5a14 14 0 0 1 0 19 14 14 0 0 1 0-19z"/>',
     alert: '<path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18h.01" stroke-width="2.6"/>',
     info: '<circle cx="12" cy="12" r="9.5"/><path d="M12 11v6M12 7.5h.01" stroke-width="2.6"/>',
-    star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/>'
+    star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/>',
+    clock: '<circle cx="12" cy="12" r="9.5"/><path d="M12 7v5l3.5 2"/>',
+    grid: '<rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/>',
+    upload: '<path d="M12 16V4"/><path d="M7 8.5l5-5 5 5"/><path d="M4 20h16"/>',
+    hand: '<path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V11"/><path d="M11 10.5V4a1.5 1.5 0 0 1 3 0v6.5"/><path d="M14 10.5V5.5a1.5 1.5 0 0 1 3 0V14"/><path d="M8 13l-1.6-2a1.6 1.6 0 0 0-2.5 2l3.4 4.6A7 7 0 0 0 13 21h.5a5 5 0 0 0 5-5V8.5a1.5 1.5 0 0 1 3 0"/>',
+    walk: '<circle cx="13" cy="4.5" r="2"/><path d="M9 21l2.5-6.5L14 17v4"/><path d="M7 11.5l3-3.5 4 1.5 2 3 2.5 1"/><path d="M11.5 14.5L10 8"/>',
+    poll: '<path d="M5 20V11"/><path d="M12 20V4"/><path d="M19 20v-6"/>',
+    slash: '<circle cx="12" cy="12" r="9.5"/><path d="M5.3 5.3l13.4 13.4"/>',
+    crown: '<path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5z"/>',
+    megaphone: '<path d="M3 10.5v3a1 1 0 0 0 1 1h3l9 5V4.5l-9 5H4a1 1 0 0 0-1 1z"/><path d="M7 14.5l1.5 5h2.5l-1-5"/><path d="M19.5 9.5a3 3 0 0 1 0 5"/>',
+    follow: '<path d="M4 12h12"/><path d="M12 6l6 6-6 6"/><path d="M20 5v14"/>'
 };
 
 export function icon(name, cls = '') {
