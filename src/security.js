@@ -69,29 +69,45 @@ class RateLimiter {
     }
 }
 
-const CSP = [
-    "default-src 'self'",
-    "script-src 'self' https://www.youtube.com https://s.ytimg.com",
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob: https://i.ytimg.com https://*.ytimg.com",
-    "media-src 'self' blob: mediastream:",
-    "frame-src https://www.youtube.com https://www.youtube-nocookie.com",
-    "connect-src 'self' ws: wss:",
-    "font-src 'self'",
-    "worker-src 'self' blob:",
-    "object-src 'none'",
-    "base-uri 'self'",
-    "form-action 'self'",
-    "frame-ancestors 'self'"
-].join('; ');
+const HOST_RE = /^[A-Za-z0-9.\-:[\]]{1,255}$/;
 
-function securityHeaders(req, res, next) {
-    res.setHeader('Content-Security-Policy', CSP);
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-    res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self), display-capture=(self), geolocation=()');
-    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
-    next();
+/** Builds the Content-Security-Policy for one request (YouTube sources only when enabled). */
+function buildCsp(req, { youtube = false } = {}) {
+    const host = HOST_RE.test(String(req.headers.host || '')) ? req.headers.host : '';
+    const ws = host ? ` ws://${host} wss://${host}` : '';
+    const yt = youtube;
+    return [
+        "default-src 'self'",
+        "script-src 'self'" + (yt ? ' https://www.youtube.com https://s.ytimg.com' : ''),
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: blob:" + (yt ? ' https://i.ytimg.com' : ''),
+        "media-src 'self' blob: mediastream:",
+        "frame-src " + (yt ? 'https://www.youtube.com https://www.youtube-nocookie.com' : "'none'"),
+        "connect-src 'self'" + ws,
+        "font-src 'self'",
+        "worker-src 'self' blob:",
+        "manifest-src 'self'",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "frame-ancestors 'self'"
+    ].join('; ');
 }
 
-module.exports = { cleanText, cleanMultiline, isPlainObject, hashPassword, verifyPassword, RateLimiter, securityHeaders, CSP };
+function isSecureRequest(req, trustProxy) {
+    if (req.socket && req.socket.encrypted) return true;
+    return trustProxy && String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
+}
+
+function applySecurityHeaders(req, res, { youtube = false, trustProxy = false } = {}) {
+    res.setHeader('Content-Security-Policy', buildCsp(req, { youtube }));
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Permissions-Policy', 'camera=(self), microphone=(self), display-capture=(self), geolocation=(), payment=(), usb=()');
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    if (isSecureRequest(req, trustProxy)) res.setHeader('Strict-Transport-Security', 'max-age=15552000');
+}
+
+module.exports = { cleanText, cleanMultiline, isPlainObject, hashPassword, verifyPassword, RateLimiter, buildCsp, applySecurityHeaders, isSecureRequest };

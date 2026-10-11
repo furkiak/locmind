@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { io: connect } = require('socket.io-client');
+const { connect } = require('../src/net/client');
 const { createApp } = require('../src/app');
 const W = require('../shared/world');
 
@@ -12,14 +12,14 @@ async function boot() {
         ok: true,
         json: async () => ({ title: `Title of ${String(url).slice(-11)}` })
     });
-    const ctx = createApp({ fetchImpl: fakeFetch });
+    const ctx = createApp({ fetchImpl: fakeFetch, LOG_LEVEL: 'silent', MAX_CONNECTIONS_PER_IP: 1000 });
     await new Promise(r => ctx.server.listen(0, '127.0.0.1', r));
     ctx.url = `http://127.0.0.1:${ctx.server.address().port}`;
     return ctx;
 }
 
 function client(ctx) {
-    const s = connect(ctx.url, { transports: ['websocket'], forceNew: true, reconnection: false });
+    const s = connect(ctx.url);
     s.events = [];
     s.onAny((name, ...args) => s.events.push([name, ...args]));
     s.waitFor = (name, pred = () => true, timeout = 2000) => new Promise((resolve, reject) => {
@@ -30,7 +30,7 @@ function client(ctx) {
         s.on(name, handler);
     });
     s.call = (event, payload) => new Promise(resolve => s.emit(event, payload, resolve));
-    return new Promise(resolve => s.on('connect', () => resolve(s)));
+    return new Promise((resolve, reject) => { s.on('connect', () => resolve(s)); s.on('connect_error', reject); });
 }
 
 async function join(ctx, nickname) {
@@ -69,6 +69,7 @@ test('protocol end to end', async t => {
         assert.equal(a.me.ok, true);
         assert.equal(a.me.slots.length, 21);
         assert.ok(a.me.emojis.images.length >= 4, 'emoji files are served from public/emoji');
+        assert.ok(Array.isArray(a.me.iceServers), 'ICE servers come with the join answer');
         assert.ok(!JSON.stringify(a.me).includes('password'), 'no secrets in the world snapshot');
         const b = await join(ctx, 'Bob'); socks.push(b);
         const [pj] = await a.waitFor('player:join', p => p.nickname === 'Bob');
@@ -325,7 +326,7 @@ test('http endpoints and headers', async t => {
     assert.equal(health.ok, true);
 
     const cfg = await (await get('/api/config')).json();
-    assert.ok(Array.isArray(cfg.iceServers) && cfg.iceServers.length > 0);
+    assert.equal(typeof cfg.name, 'string');
 
     const index = await get('/');
     assert.equal(index.status, 200);
@@ -337,4 +338,13 @@ test('http endpoints and headers', async t => {
     assert.equal((await get('/emoji/1.png')).status, 200);
     assert.equal((await get('/api/yt/search?q=a')).status, 400);
     assert.equal((await get('/../server.js')).status, 404);
+    assert.equal((await get('/%2e%2e/server.js')).status, 404);
+    assert.equal((await get('/js/%00main.js')).status, 404);
+    const js = await fetch(ctx.url + '/js/main.js', { headers: { 'accept-encoding': 'br' } });
+    assert.equal(js.headers.get('content-encoding'), 'br');
+    const etag = js.headers.get('etag');
+    assert.equal((await fetch(ctx.url + '/js/main.js', { headers: { 'if-none-match': etag } })).status, 304);
+    const part = await fetch(ctx.url + '/usr1.png', { headers: { range: 'bytes=0-9' } });
+    assert.equal(part.status, 206);
+    assert.equal((await part.arrayBuffer()).byteLength, 10);
 });

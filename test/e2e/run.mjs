@@ -27,7 +27,7 @@ if (!chromium || !exe) {
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const ctx = createApp();
+const ctx = createApp({ LOG_LEVEL: 'silent', MAX_CONNECTIONS_PER_IP: 1000 });
 await new Promise(r => ctx.server.listen(0, '127.0.0.1', r));
 const URL = `http://127.0.0.1:${ctx.server.address().port}/`;
 const browser = await chromium.launch({
@@ -172,7 +172,7 @@ try {
 
     await check('network drop: the player resumes in the same room, still owner and unlocked', async () => {
         const before = await my(a, () => window.__locmind.S.myId);
-        await a.evaluate(() => window.__locmind.S.socket.io.engine.close());
+        await a.evaluate(() => window.__locmind.S.socket.drop());
         await a.waitForFunction(old => window.__locmind.S.connected && window.__locmind.S.myId !== old && window.__locmind.S.currentRoomId, before, { timeout: 15000 });
         assert.equal(await my(a, () => { const S = window.__locmind.S; return S.rooms[S.currentRoomId].owner === S.myId; }), true);
         await a.waitForFunction(() => window.__locmind.linkedIds().size === 1, null, { timeout: 15000 });

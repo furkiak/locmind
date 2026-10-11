@@ -15,10 +15,10 @@ const RTC_CHANNELS = new Set(['audio', 'camera', 'screen']);
 const RTC_TYPES = new Set(['offer', 'answer', 'candidate', 'close']);
 
 /**
- * Wires the whole realtime protocol onto a socket.io server.
+ * Wires the whole realtime protocol onto the hub (see net/hub.js).
  * Returns { stop() } so tests and graceful shutdown can clear the timers.
  */
-function createGame(io, { world, youtube, config, emojiFiles = [], limiter = new RateLimiter() }) {
+function createGame(io, { world, youtube, config, emojiFiles = [], limiter = new RateLimiter(), iceServersFor = () => [] }) {
     const dirty = new Set();
     const resumes = new Map();          // token -> state of a player that just dropped (for seamless reconnects)
     const RESUME_TTL_MS = 90 * 1000;
@@ -32,7 +32,7 @@ function createGame(io, { world, youtube, config, emojiFiles = [], limiter = new
     }
 
     function enterRoom(player, roomId) {
-        const sock = io.sockets.sockets.get(player.id);
+        const sock = io.clients.get(player.id);
         if (!sock) return;
         sock.join(rkey(roomId));
         const room = world.rooms.get(roomId);
@@ -40,7 +40,7 @@ function createGame(io, { world, youtube, config, emojiFiles = [], limiter = new
     }
 
     function leaveRoom(player, roomId) {
-        const sock = io.sockets.sockets.get(player.id);
+        const sock = io.clients.get(player.id);
         if (sock) sock.leave(rkey(roomId));
     }
 
@@ -84,8 +84,8 @@ function createGame(io, { world, youtube, config, emojiFiles = [], limiter = new
         const t = world.now();
         for (const p of Array.from(world.players.values())) {
             if (t - p.lastActive > limit) {
-                const sock = io.sockets.sockets.get(p.id);
-                if (sock) { sock.emit('kicked', { reason: 'afk' }); sock.disconnect(true); }
+                const sock = io.clients.get(p.id);
+                if (sock) { sock.emit('kicked', { reason: 'afk' }); sock.disconnect(4001, 'afk'); }
             }
         }
         limiter.sweep();
@@ -113,9 +113,9 @@ function createGame(io, { world, youtube, config, emojiFiles = [], limiter = new
         // The old connection may still look alive for a while after a network drop: take it over.
         for (const p of Array.from(world.players.values())) {
             if (p.token === token) {
-                const sock = io.sockets.sockets.get(p.id);
+                const sock = io.clients.get(p.id);
                 dropPlayer(p.id);
-                if (sock) sock.disconnect(true);
+                if (sock) sock.disconnect(4002, 'replaced');
                 break;
             }
         }
@@ -126,15 +126,6 @@ function createGame(io, { world, youtube, config, emojiFiles = [], limiter = new
     }
 
     io.on('connection', socket => {
-        // Flood guard: a well behaved client never gets near this.
-        let windowStart = Date.now(), count = 0;
-        socket.use((_packet, next) => {
-            const t = Date.now();
-            if (t - windowStart >= 1000) { windowStart = t; count = 0; }
-            if (++count > 400) { socket.disconnect(true); return; }
-            next();
-        });
-
         /** Registers a handler with join check, rate limit, ack safety and error isolation. */
         function on(event, opts, handler) {
             if (typeof opts === 'function') { handler = opts; opts = {}; }
@@ -170,6 +161,7 @@ function createGame(io, { world, youtube, config, emojiFiles = [], limiter = new
                     ok: true,
                     you: p.id,
                     token: p.token,
+                    iceServers: iceServersFor(socket, p),
                     unlocked: world.unlockedSlots(p),
                     slots: world.slots,
                     rooms: world.publicRooms(),

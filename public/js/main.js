@@ -153,7 +153,7 @@ async function enterWorld() {
 
     initAudio();   // must happen inside the click handler
     try { S.config = await (await fetch('/api/config', { cache: 'no-store' })).json(); }
-    catch (_) { S.config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }], afkLimitMs: 1800000, afkGraceMs: 45000 }; }
+    catch (_) { S.config = { iceServers: [], youtube: false, afkLimitMs: 1800000, afkGraceMs: 45000 }; }
 
     if (!(await waitForSocket())) { showLoginError('kicked_timeout'); restore(); return; }
     const res = await joinWorld(nick, selectedAvatar);

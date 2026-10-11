@@ -2,6 +2,7 @@
 import { S, bus, makePlayer, redraw, me } from './state.js';
 import { handleSignal, closeAllLinks, closeLinksFor } from './rtc.js';
 import { refreshZone, applySnap } from './movement.js';
+import { Transport } from './transport.js';
 
 export function send(event, payload, ack) {
     if (S.socket) S.socket.emit(event, payload, ack);
@@ -20,6 +21,7 @@ function applyWorld(res) {
     S.emojis = res.emojis;
     S.unlocked = new Set(res.unlocked || []);
     S.resume = res.token;
+    if (S.config) S.config.iceServers = res.iceServers || [];
     S.currentRoomId = null;
     S.currentSlotId = null;
     refreshZone();
@@ -39,7 +41,7 @@ export function joinWorld(nickname, avatar) {
 }
 
 export function initNet() {
-    const socket = window.io({ transports: ['websocket', 'polling'] });
+    const socket = new Transport('/ws');
     S.socket = socket;
     let dropped = false;
 
@@ -59,7 +61,7 @@ export function initNet() {
         if (S.active) { dropped = true; closeAllLinks(); bus.emit('conn', 'down'); }
     });
 
-    socket.on('kicked', d => { S.active = false; closeAllLinks(); bus.emit('kicked', d || {}); });
+    socket.on('kicked', d => { S.active = false; socket.disconnect(); closeAllLinks(); bus.emit('kicked', d || {}); });
 
     socket.on('player:join', p => { S.players[p.id] = makePlayer(p); bus.emit('players'); redraw(); });
     socket.on('player:leave', id => {

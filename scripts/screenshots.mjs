@@ -13,7 +13,7 @@ if (!exe) { console.error('Set CHROMIUM_PATH to a Chromium/Chrome binary.'); pro
 
 const OUT = new URL('../docs/', import.meta.url).pathname;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const app = createApp();
+const app = createApp({ LOG_LEVEL: 'silent', MAX_CONNECTIONS_PER_IP: 1000 });
 await new Promise(r => app.server.listen(0, '127.0.0.1', r));
 const BASE = `http://127.0.0.1:${app.server.address().port}/`;
 const browser = await chromium.launch({ executablePath: exe, args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required', '--no-sandbox'] });
