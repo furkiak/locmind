@@ -1,5 +1,66 @@
 # Changelog
 
+## 3.0.0
+
+Locmind now runs on Node.js alone: no `npm install`, no database, no third-party services. Everything
+a self-hosted community needs is built in, from the WebSocket server to the TURN relay and an admin panel.
+
+### Self-hosting, zero dependencies
+- Express and Socket.IO are gone. New dependency-free building blocks: an HTTP router, a static file
+  server (brotli / gzip cached in memory, ETags, range requests, traversal protection), an RFC 6455
+  WebSocket server and client, and a realtime hub with rooms, acknowledgements, encode-once broadcasts,
+  back pressure, origin checks, per-address limits and a flood guard.
+- **Built-in STUN / TURN relay** (RFC 5389 / 8656 subset) over UDP, TCP and TLS with short-lived
+  credentials, quotas, a bandwidth cap and private-network peer filtering. Voice works behind strict
+  NATs without coturn or any external service; `?relay=1` forces relaying for testing.
+- **HTTPS** with your own certificate or a generated self-signed one (`TLS_SELF_SIGNED=true`).
+- Layered configuration: command line flags, environment, `locmind.json`, defaults.
+- Persistence in `DATA_DIR` (secrets, bans, settings, permanent rooms) with atomic writes.
+- **Admin panel** at `/admin`: live dashboard with charts, players (mute, kick, ban), rooms (create
+  permanent rooms, close any room), music library, bans, settings (message of the day, server password,
+  uploads, word filter) and announcements. Brute-force lockout on the admin token.
+- Prometheus metrics at `/metrics`, JSON or pretty logs, graceful shutdown, health checks.
+- Dependency-free Dockerfile, a compose file with the TURN ports, a hardened systemd unit and nginx /
+  Caddy examples in `deploy/`.
+- YouTube is optional and off by default: out of the box Locmind makes no third-party request.
+
+### New for players
+- **Profiles:** status (available, busy, away, do not disturb), a status line and an emoji avatar maker.
+- **Player card:** click anyone to message, wave, walk there, follow them, change their volume or block them.
+- **Direct messages**, waves, typing indicator, @mentions, announcements and optional desktop notifications.
+- **Room tools:** raise-hand queue, polls with live results, a shared timer, room topic, and owner
+  settings (rename, colour, password, remove people).
+- **Auditorium:** a stage that reaches the whole hall while the audience only whispers to neighbours;
+  screen sharing from the stage.
+- **Self-hosted music library:** drop files into `media/music` or let players upload songs; synced
+  playback with a plain `<audio>` element.
+- **Path finding:** click anywhere, on the minimap or in the room directory ("Take me there") and your
+  avatar walks around walls and through doors.
+- Push-to-talk (hold V), microphone level meter, connection quality indicator, camera gallery,
+  chat history on join, offline app shell (service worker), server password and message of the day
+  on the sign-in screen.
+
+### Performance
+- Interest management, compact movement rows (short ids, integer coordinates, packed direction),
+  crowd stride, interest-managed football updates and corked socket writes: 3–5× less traffic per
+  player in crowds. 800 simulated players use under half a CPU core and about 120 MB (see PERFORMANCE.md).
+- `npm run bench`: a dependency-free load test that runs the server in its own process.
+
+### Security
+- WebRTC signalling is schema checked, only connects nearby players and has a per-pair budget.
+- `X-Forwarded-For` is read from the right (`TRUST_PROXY` takes a hop count), `/metrics` refuses
+  proxied requests, upload quotas hold for streamed bodies, oversized requests get an answer before
+  the connection closes.
+- Fuzz tests for every realtime event, HTTP path traversal and uploads. See SECURITY.md.
+
+### Fixed
+- A focused text field inside a closed window swallowed every keyboard shortcut; Esc now hands the
+  keyboard back to the world from any field.
+- Walking stopped as soon as another player nudged you into a wall; you now slide along walls and
+  re-plan around people.
+- The football was broadcast 33 times a second to every player in the world.
+- Low frame rates slowed walking down (time step clamp).
+
 ## 2.0.0
 
 A complete overhaul: modular server, modular client, a new design language, many fixes and a lot of new features.

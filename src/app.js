@@ -16,7 +16,7 @@ const { World } = require('./world');
 const { createGame } = require('./game');
 const { YouTubeService } = require('./youtube');
 const { Store } = require('./store');
-const { TurnServer } = require('./turn/server');
+const { TurnServer, classifyIp } = require('./turn/server');
 const { Bans, Settings } = require('./moderation');
 const { Library } = require('./library');
 const { Metrics } = require('./metrics');
@@ -134,6 +134,9 @@ function createApp(overrides = {}, baseConfig = null) {
             await t.start();
             turn = t;
             log.info('STUN/TURN relay ready', { port: t.port, tls: t.tls ? t.tlsPort : 'off', relayIp: t.publicIp, relayPorts: `${t.relayMin}-${t.relayMax}` });
+            if (!cfg.TURN_PUBLIC_IP && classifyIp(t.publicIp) !== 'public') {
+                log.warn(`the relay advertises ${t.publicIp}, which only works inside this network; set TURN_PUBLIC_IP to the server's public address for visitors from the internet`);
+            }
         } catch (err) {
             log.warn(`STUN/TURN could not start (${err.message}); voice still works on simple networks`);
         }

@@ -53,7 +53,8 @@ const STRINGS = {
         removeText: 'The file is removed from the disk.', removed: 'Track deleted', quota: '{used} of {total} used',
         since: 'Since', until: 'Until', unban: 'Unban', noBans: 'No active bans.', unbanned: 'Ban lifted',
         'error.invalid-slot': 'Pick a plot.', 'error.invalid-name': 'Give the room a name.', 'error.not-found': 'Not found.',
-        'error.rate-limit': 'Slow down a little.', failed: 'Something went wrong.', ago: '{t} ago', now: 'now', preview: 'Play'
+        'error.rate-limit': 'Slow down a little.', failed: 'Something went wrong.', ago: '{t} ago', now: 'now', preview: 'Play',
+        'status.available': 'Available', 'status.busy': 'Busy', 'status.away': 'Away', 'status.dnd': 'Do not disturb'
     },
     tr: {
         title: 'Locmind Yönetim', loginHint: 'Sunucu günlüğünde yazan ya da data/secrets.json içinde saklanan yönetici anahtarını yapıştırın.',
@@ -98,7 +99,8 @@ const STRINGS = {
         removeText: 'Dosya diskten silinir.', removed: 'Parça silindi', quota: '{total} alanın {used} kadarı dolu',
         since: 'Başlangıç', until: 'Bitiş', unban: 'Yasağı kaldır', noBans: 'Etkin yasak yok.', unbanned: 'Yasak kaldırıldı',
         'error.invalid-slot': 'Bir arsa seçin.', 'error.invalid-name': 'Odaya bir ad verin.', 'error.not-found': 'Bulunamadı.',
-        'error.rate-limit': 'Biraz yavaşlayın.', failed: 'Bir şeyler ters gitti.', ago: '{t} önce', now: 'şimdi', preview: 'Çal'
+        'error.rate-limit': 'Biraz yavaşlayın.', failed: 'Bir şeyler ters gitti.', ago: '{t} önce', now: 'şimdi', preview: 'Çal',
+        'status.available': 'Müsait', 'status.busy': 'Meşgul', 'status.away': 'Uzakta', 'status.dnd': 'Rahatsız etmeyin'
     }
 };
 const lang = (new URLSearchParams(location.search).get('lang') || (navigator.language || 'en')).slice(0, 2).toLowerCase() === 'tr' ? 'tr' : 'en';
@@ -402,7 +404,7 @@ function renderPlayers() {
     for (const p of list) {
         const media = [p.muted ? null : t('mic'), p.cam ? t('cam') : null, p.screen ? t('screen') : null].filter(Boolean);
         tbody.append(h('tr', {},
-            h('td', {}, h('div', { class: 'who' }, avatarEl(p.avatar), h('div', {}, h('strong', {}, p.nickname), h('span', {}, p.status || 'available')),
+            h('td', {}, h('div', { class: 'who' }, avatarEl(p.avatar), h('div', {}, h('strong', {}, p.nickname), h('span', {}, t(`status.${p.status || 'available'}`))),
                 p.chatMutedUntil ? h('span', { class: 'tag warn' }, t('mutedUntil')) : null)),
             h('td', {}, p.room || t('world')),
             h('td', { class: 'num mono' }, p.ip || ''),
