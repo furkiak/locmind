@@ -26,7 +26,7 @@ const DEFAULTS = {
     ALLOW_UPLOADS: true,
     UPLOAD_MAX_MB: 25,
     UPLOAD_QUOTA_MB: 1024,
-    YOUTUBE: true,
+    YOUTUBE: false,
     INVIDIOUS_INSTANCES: 'https://yewtu.be,https://inv.nadeko.net,https://invidious.nerdvpn.de',
     TURN: true,
     TURN_PORT: 3478,
@@ -84,7 +84,8 @@ function loadConfig({ argv = process.argv.slice(2), env = process.env, cwd = pro
     const cfg = {
         PORT: INT(raw.PORT, 3000),
         HOST: String(raw.HOST),
-        TRUST_PROXY: BOOL(raw.TRUST_PROXY),
+        // false, true (one proxy) or the number of proxies in front of Locmind
+        TRUST_PROXY: /^\d+$/.test(String(raw.TRUST_PROXY).trim()) ? Math.min(10, Number(raw.TRUST_PROXY)) : BOOL(raw.TRUST_PROXY) ? 1 : 0,
         CORS_ORIGINS: LIST(raw.CORS_ORIGIN),
         MAX_PLAYERS: Math.max(1, INT(raw.MAX_PLAYERS, 150)),
         AFK_LIMIT_MS: Math.max(1, INT(raw.AFK_LIMIT_MINUTES, 30)) * 60 * 1000,

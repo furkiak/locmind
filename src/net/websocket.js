@@ -11,6 +11,11 @@ const { OP, acceptKey, encodeFrame, closePayload, validCloseCode, Receiver, Prot
 
 const KEY_RE = /^[A-Za-z0-9+/]{22}==$/;
 
+function uncork(conn) {
+    conn.corked = false;
+    if (!conn.socket.destroyed) conn.socket.uncork();
+}
+
 class WebSocketConnection extends EventEmitter {
     constructor(socket, { maxPayload = 64 * 1024, isServer = true } = {}) {
         super();
@@ -59,9 +64,17 @@ class WebSocketConnection extends EventEmitter {
         this.finish(code, reason);
     }
 
-    /** Writes an already encoded frame (lets a broadcaster encode once and fan out). */
+    /**
+     * Writes an already encoded frame (lets a broadcaster encode once and fan out).
+     * Frames written during the same tick are corked and leave in one writev() system call.
+     */
     writeRaw(frame) {
         if (this.readyState > 2 || this.socket.destroyed) return false;
+        if (!this.corked) {
+            this.corked = true;
+            this.socket.cork();
+            process.nextTick(uncork, this);
+        }
         return this.socket.write(frame);
     }
 

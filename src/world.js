@@ -68,8 +68,9 @@ class World extends EventEmitter {
         }
         const spawn = resume ? { x: resume.x, y: resume.y } : this._spawnPoint();
         const t = this.now();
+        this.seqN = (this.seqN || 0) % 0x7fffffff + 1;
         const player = {
-            id, nickname: name,
+            id, n: this.seqN, nickname: name,
             avatar: W.validAvatar(avatar) ? avatar : W.AVATARS[0],
             status: W.STATUSES.includes(status) ? status : 'available',
             statusText: cleanText(statusText, 40),
@@ -128,7 +129,7 @@ class World extends EventEmitter {
 
     publicPlayer(p) {
         return {
-            id: p.id, nickname: p.nickname, avatar: p.avatar, status: p.status, statusText: p.statusText,
+            id: p.id, n: p.n, nickname: p.nickname, avatar: p.avatar, status: p.status, statusText: p.statusText,
             x: p.x, y: p.y, dirX: p.dirX, dirY: p.dirY, muted: p.muted, cam: p.cam, screen: p.screen
         };
     }

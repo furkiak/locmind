@@ -13,7 +13,8 @@ class Metrics {
         this.history = [];
         this.keep = keep;
         this.http = { total: 0, '2xx': 0, '3xx': 0, '4xx': 0, '5xx': 0 };
-        this.loop = monitorEventLoopDelay({ resolution: 20 });
+        this.loopResolutionMs = 10;
+        this.loop = monitorEventLoopDelay({ resolution: this.loopResolutionMs });
         this.loop.enable();
         this.lastCpu = process.cpuUsage();
         this.lastAt = process.hrtime.bigint();
@@ -47,8 +48,9 @@ class Metrics {
             cpu: Math.round((cpu.user + cpu.system) / elapsedUs * 1000) / 10,          // % of one core
             rss: process.memoryUsage().rss,
             heap: process.memoryUsage().heapUsed,
-            loopP50: Math.round(this.loop.percentile(50) / 1e4) / 100,                 // ms
-            loopP99: Math.round(this.loop.percentile(99) / 1e4) / 100,
+            // the histogram measures the timer period, so the sampling interval itself is subtracted
+            loopP50: Math.max(0, Math.round(this.loop.percentile(50) / 1e4) / 100 - this.loopResolutionMs),   // ms
+            loopP99: Math.max(0, Math.round(this.loop.percentile(99) / 1e4) / 100 - this.loopResolutionMs),
             inKBs: Math.round((s.bytesIn - this.lastBytes.in) / secs / 102.4) / 10,
             outKBs: Math.round((s.bytesOut - this.lastBytes.out) / secs / 102.4) / 10,
             turnKBs: Math.round((turnBytes - this.lastBytes.turn) / secs / 102.4) / 10,

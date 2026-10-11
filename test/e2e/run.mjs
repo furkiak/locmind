@@ -41,7 +41,7 @@ function toneWav(seconds = 2, rate = 8000) {
     return buf;
 }
 fs.writeFileSync(tmp + '/media/music/Test Tone.wav', toneWav());
-const ctx = createApp({ LOG_LEVEL: 'silent', MAX_CONNECTIONS_PER_IP: 1000, DATA_DIR: tmp + '/data', MEDIA_DIR: tmp + '/media', ADMIN_TOKEN: 'e2e-admin-token', TURN: true, TURN_PORT: 0, TURN_PUBLIC_IP: '127.0.0.1', TURN_RELAY_MIN: relayBase, TURN_RELAY_MAX: relayBase + 40 });
+const ctx = createApp({ LOG_LEVEL: 'silent', MAX_CONNECTIONS_PER_IP: 1000, DATA_DIR: tmp + '/data', MEDIA_DIR: tmp + '/media', ADMIN_TOKEN: 'e2e-admin-token', YOUTUBE: true, TURN: true, TURN_PORT: 0, TURN_PUBLIC_IP: '127.0.0.1', TURN_RELAY_MIN: relayBase, TURN_RELAY_MAX: relayBase + 40 });
 await ctx.ready;
 await new Promise(r => ctx.server.listen(0, '127.0.0.1', r));
 const URL = `http://127.0.0.1:${ctx.server.address().port}/`;

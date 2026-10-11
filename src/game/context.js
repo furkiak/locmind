@@ -7,6 +7,7 @@
 
 const crypto = require('crypto');
 const W = require('../../shared/world');
+const { textFrame } = require('../net/frames');
 
 const rkey = id => `room:${id}`;
 const round = (v, d = 1) => { const m = 10 ** d; return Math.round(v * m) / m; };
@@ -26,9 +27,22 @@ function makeContext(hub, deps) {
     ctx.client = id => hub.clients.get(id);
     ctx.toRoom = (room, event, payload) => hub.to(rkey(room.id)).emit(event, payload);
 
+    // The ball moves 33 times a second. Only people around the stadium need every update;
+    // everybody else gets two a second (the final resting position is always sent reliably).
+    const BALL_NEAR = 900, BALL_FAR_EVERY = 15;
+    const ST = W.STADIUM;
+    const nearStadium = p => p.x > ST.x - BALL_NEAR && p.x < ST.x + ST.w + BALL_NEAR && p.y > ST.y - BALL_NEAR && p.y < ST.y + ST.h + BALL_NEAR;
+    let ballTicks = 0;
     ctx.broadcastBall = (reliable = true) => {
         const payload = world.football.snapshot();
-        (reliable ? hub : hub.volatile).emit('ball', payload);
+        if (reliable) { hub.emit('ball', payload); return; }
+        const far = ++ballTicks % BALL_FAR_EVERY === 0;
+        const frame = textFrame(JSON.stringify(['ball', payload]));
+        for (const p of world.players.values()) {
+            if (!far && !nearStadium(p)) continue;
+            const sock = hub.clients.get(p.id);
+            if (sock) hub.sendFrame(sock, frame, true);
+        }
     };
 
     ctx.enterRoom = (player, roomId) => {

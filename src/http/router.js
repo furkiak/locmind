@@ -51,13 +51,15 @@ function readBody(req, limit) {
         const declared = Number(req.headers['content-length']);
         if (Number.isFinite(declared) && declared > limit) { req.resume(); reject(new HttpError(413, 'too-large')); return; }
         const chunks = [];
-        let size = 0;
+        let size = 0, over = false;
         req.on('data', c => {
+            if (over) return;
             size += c.length;
-            if (size > limit) { req.destroy(); reject(new HttpError(413, 'too-large')); return; }
+            // stop collecting; the caller answers and the connection is closed after the response
+            if (size > limit) { over = true; chunks.length = 0; req.pause(); reject(new HttpError(413, 'too-large')); return; }
             chunks.push(c);
         });
-        req.on('end', () => resolve(Buffer.concat(chunks, size)));
+        req.on('end', () => { if (!over) resolve(Buffer.concat(chunks, size)); });
         req.on('error', reject);
     });
 }

@@ -22,6 +22,8 @@ async function bootApp(extra = {}) {
     const dir = tmpDir();
     const ctx = createApp({
         fetchImpl: fakeFetch, LOG_LEVEL: 'silent', MAX_CONNECTIONS_PER_IP: 1000, TURN: false,
+        // the optional YouTube integration is exercised with a fake fetch; it is off by default in production
+        YOUTUBE: true, INVIDIOUS_INSTANCES: ['https://invidious.example'],
         DATA_DIR: path.join(dir, 'data'), MEDIA_DIR: path.join(dir, 'media'), ...extra
     });
     await ctx.ready;

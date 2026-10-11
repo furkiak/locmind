@@ -15,7 +15,8 @@ function applyWorld(res) {
     S.rooms = {};
     res.rooms.forEach(r => { S.rooms[r.id] = r; });
     S.players = {};
-    res.players.forEach(p => { S.players[p.id] = makePlayer(p); });
+    S.byNum = new Map();
+    res.players.forEach(p => { S.players[p.id] = makePlayer(p); S.byNum.set(p.n, S.players[p.id]); });
     S.ball = { ...res.ball, rx: res.ball.x, ry: res.ball.y };
     S.score = res.score;
     S.emojis = res.emojis;
@@ -73,9 +74,10 @@ export function initNet() {
     socket.on('kicked', d => { S.active = false; socket.disconnect(); closeAllLinks(); bus.emit('kicked', d || {}); });
     socket.on('rtt', ms => { S.rtt = ms; bus.emit('rtt', ms); });
 
-    socket.on('player:join', p => { S.players[p.id] = makePlayer(p); bus.emit('players'); redraw(); });
+    socket.on('player:join', p => { S.players[p.id] = makePlayer(p); S.byNum.set(p.n, S.players[p.id]); bus.emit('players'); redraw(); });
     socket.on('player:leave', id => {
         closeLinksFor(id);
+        if (S.players[id]) S.byNum.delete(S.players[id].n);
         delete S.players[id];
         delete S.userVolumes[id];
         bus.emit('player-left', id);
@@ -83,12 +85,13 @@ export function initNet() {
         redraw();
     });
 
+    // rows are [short id, x, y, direction 0..63]
     socket.on('players:move', rows => {
-        for (const [id, x, y, dx, dy] of rows) {
-            if (id === S.myId) continue;
-            const p = S.players[id];
-            if (!p) continue;
-            p.x = x; p.y = y; p.dirX = dx; p.dirY = dy;
+        for (const [n, x, y, d] of rows) {
+            const p = S.byNum.get(n);
+            if (!p || p.id === S.myId) continue;
+            const a = d / 64 * Math.PI * 2 - Math.PI;
+            p.x = x; p.y = y; p.dirX = Math.cos(a); p.dirY = Math.sin(a);
         }
         redraw();
     });

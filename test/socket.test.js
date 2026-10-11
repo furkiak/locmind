@@ -64,6 +64,22 @@ test('protocol end to end', async t => {
         await sleep(100);
         assert.ok(!b.events.some(e => e[0] === 'rtc:signal'));
         assert.ok(!a.events.some(e => e[0] === 'rtc:signal'), 'no echo to self');
+
+        // only the fields a browser needs are relayed
+        a.emit('rtc:signal', { to: b.id, channel: 'audio', type: 'candidate', data: { candidate: 'candidate:1 1 udp 1 1.2.3.4 5 typ host', sdpMid: '0', sdpMLineIndex: 0, junk: 'x'.repeat(5000) } });
+        const [cand] = await b.waitFor('rtc:signal', s => s.type === 'candidate');
+        assert.deepEqual(Object.keys(cand.data).sort(), ['candidate', 'sdpMLineIndex', 'sdpMid']);
+
+        // nobody can push signals at a player on the other side of the map
+        const pa = ctx.world.players.get(a.id), pb = ctx.world.players.get(b.id);
+        const saved = { x: pb.x, y: pb.y };
+        pb.x = 3000; pb.y = 2800;
+        b.events.length = 0;
+        a.emit('rtc:signal', { to: b.id, channel: 'audio', type: 'offer', data: { sdp: 'v=0', type: 'offer' } });
+        await sleep(100);
+        assert.ok(!b.events.some(e => e[0] === 'rtc:signal'), 'far away players are out of reach');
+        pb.x = saved.x; pb.y = saved.y;
+        assert.ok(Math.hypot(pa.x - pb.x, pa.y - pb.y) < 1000);
     });
 
     await t.test('status flags are broadcast and shown to late joiners', async () => {
@@ -83,8 +99,10 @@ test('protocol end to end', async t => {
         const [a, b] = socks;
         const p = ctx.world.players.get(a.id);
         a.emit('move', { x: p.x + 8, y: p.y + 2, dirX: 1, dirY: 0 });
-        const [batch] = await b.waitFor('players:move', rows => rows.some(r => r[0] === a.id));
-        assert.ok(Array.isArray(batch));
+        const [batch] = await b.waitFor('players:move', rows => rows.some(r => r[0] === p.n));
+        const mine = batch.find(r => r[0] === p.n);
+        // compact row: [short id, integer x, integer y, direction 0..63]
+        assert.deepEqual(mine, [p.n, Math.round(p.x), Math.round(p.y), 32]);
         a.events.length = 0;
         a.emit('move', { x: 3000, y: 3000, dirX: 1, dirY: 0 });
         const [snap] = await a.waitFor('player:snap');

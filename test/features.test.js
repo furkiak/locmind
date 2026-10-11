@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const https = require('https');
 const W = require('../shared/world');
 const { createApp } = require('../src/app');
-const { bootApp, client, join, walkTo, sleep, slotCenter, enterPlot } = require('./helpers');
+const { bootApp, client, join, walkTo, sleep, slotCenter, enterPlot, teleport } = require('./helpers');
 
 const { C } = W;
 
@@ -275,4 +275,53 @@ test('auditorium is a built-in room on the map', async t => {
     assert.ok(a.me.rooms.some(r => r.type === 'auditorium' && r.builtin));
     assert.ok(W.onStage(W.AUDITORIUM.stage.x + 50, W.AUDITORIUM.stage.y + 50));
     assert.ok(!W.onStage(W.AUDITORIUM.x + 20, W.AUDITORIUM.y + 600));
+});
+
+test('a rolling ball reaches the stadium at full rate and the rest of the world rarely', async t => {
+    const ctx = await bootApp();
+    const near = await join(ctx, 'Striker');
+    const far = await join(ctx, 'Faraway');
+    t.after(async () => { near.close(); far.close(); await ctx.close(); });
+    const f = W.STADIUM;
+    teleport(ctx, near, f.x + 100, f.y + 100);
+    teleport(ctx, far, 100, 2700);
+    const ball = ctx.world.football.ball;
+    ball.x = f.x + 200; ball.y = f.y + f.h / 2; ball.vx = 6; ball.vy = 0;
+    near.events.length = 0; far.events.length = 0;
+    await sleep(1000);
+    const count = s => s.events.filter(e => e[0] === 'ball').length;
+    assert.ok(count(near) >= 15, `near got ${count(near)}`);
+    assert.ok(count(far) <= 5, `far got ${count(far)}`);
+});
+
+test('compact movement rows carry a short id that maps to the player', async t => {
+    const ctx = await bootApp();
+    const a = await join(ctx, 'Mover');
+    const b = await join(ctx, 'Watcher');
+    t.after(async () => { a.close(); b.close(); await ctx.close(); });
+    const pa = b.me.players.find(p => p.id === a.id) || (await b.waitFor('player:join'))[0];
+    assert.ok(Number.isInteger(pa.n) && pa.n > 0);
+    const p = ctx.world.players.get(a.id);
+    a.emit('move', { x: p.x + 5, y: p.y, dirX: 0, dirY: 1 });
+    const [rows] = await b.waitFor('players:move', r => r.some(x => x[0] === pa.n));
+    const row = rows.find(x => x[0] === pa.n);
+    assert.equal(row.length, 4);
+    assert.equal(row[3], 48);   // facing down
+});
+
+test('out of the box Locmind talks to no third party', async t => {
+    const { loadConfig } = require('../src/config');
+    const cfg = loadConfig({ argv: [], env: {} });
+    assert.equal(cfg.YOUTUBE, false);
+    assert.deepEqual(cfg.INVIDIOUS_INSTANCES, []);
+    assert.equal(cfg.EXTERNAL_STUN, false);
+    const ctx = await bootApp({ YOUTUBE: false, INVIDIOUS_INSTANCES: [] });
+    const a = await join(ctx, 'Local');
+    t.after(async () => { a.close(); await ctx.close(); });
+    const res = await fetch(ctx.url + '/api/config');
+    const conf = await res.json();
+    assert.equal(conf.youtube, false);
+    assert.ok(!/youtube|ytimg|google/i.test(res.headers.get('content-security-policy')), 'CSP allows only this server');
+    assert.ok(!a.me.iceServers.some(s => JSON.stringify(s).includes('google')));
+    assert.equal((await fetch(ctx.url + '/api/yt/search?q=hello')).status, 404);
 });

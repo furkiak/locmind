@@ -26,11 +26,18 @@ function hostOnly(h) {
     return m ? m[1] : '';
 }
 
+/**
+ * The address of the person on the other end. Behind `trustProxy` reverse proxies the
+ * X-Forwarded-For list is read from the right: proxies append, so only the entries they added
+ * can be trusted (the left part is whatever the client chose to send).
+ */
 function clientIp(req, trustProxy) {
     let ip = req.socket.remoteAddress || '';
-    if (trustProxy) {
+    const hops = trustProxy === true ? 1 : Number(trustProxy) || 0;
+    if (hops > 0) {
         const fwd = req.headers['x-forwarded-for'];
-        if (typeof fwd === 'string' && fwd) ip = fwd.split(',')[0].trim();
+        const list = typeof fwd === 'string' ? fwd.split(',').map(x => x.trim()).filter(Boolean) : [];
+        if (list.length) ip = list[Math.max(0, list.length - hops)];
     }
     return ip.startsWith('::ffff:') ? ip.slice(7) : ip;
 }

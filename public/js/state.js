@@ -20,6 +20,7 @@ export const S = {
     active: false,
     connected: false,
     players: {},
+    byNum: new Map(),      // short numeric id (used by the compact movement rows) -> player
     rooms: {},
     slots: [],
     slotsById: {},

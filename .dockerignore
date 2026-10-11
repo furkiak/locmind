@@ -3,7 +3,12 @@ node_modules
 .github
 test
 docs
+scripts
+deploy
+data
+media
 *.md
 .env
 Dockerfile
 docker-compose.yml
+locmind.json

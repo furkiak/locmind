@@ -84,7 +84,11 @@ function createApp(overrides = {}, baseConfig = null) {
             if (statics.serve(req, res, pathname)) return;
             sendJson(res, 404, { error: 'not-found' });
         } catch (err) {
-            if (err instanceof HttpError) { if (!res.headersSent) sendJson(res, err.status, { error: err.code }); return; }
+            if (err instanceof HttpError) {
+                if (!req.complete) { res.setHeader('Connection', 'close'); res.on('finish', () => req.destroy()); }   // unread body left behind
+                if (!res.headersSent) sendJson(res, err.status, { error: err.code });
+                return;
+            }
             log.error('http error', err);
             if (!res.headersSent) sendJson(res, 500, { error: 'server-error' });
             else res.destroy();
@@ -231,8 +235,13 @@ function createApp(overrides = {}, baseConfig = null) {
         if (!p) throw new HttpError(401, 'unauthorized');
         if (!uploadLimiter.allow(p.token, 'upload', 6, 10 * 60 * 1000)) throw new HttpError(429, 'rate-limit');
         const declared = Number(req.headers['content-length']) || 0;
-        if (library.uploadedBytes() + declared > cfg.UPLOAD_QUOTA_BYTES) throw new HttpError(507, 'quota-full');
-        const body = await readBody(req, cfg.UPLOAD_MAX_BYTES);
+        const room = cfg.UPLOAD_QUOTA_BYTES - library.uploadedBytes();
+        if (declared > room || room <= 0) throw new HttpError(507, 'quota-full');
+        // a streamed body has no length up front: never read more than the size limit or the free quota
+        const body = await readBody(req, Math.min(cfg.UPLOAD_MAX_BYTES, room)).catch(err => {
+            throw err instanceof HttpError && err.status === 413 && room < cfg.UPLOAD_MAX_BYTES ? new HttpError(507, 'quota-full') : err;
+        });
+        if (library.uploadedBytes() + body.length > cfg.UPLOAD_QUOTA_BYTES) throw new HttpError(507, 'quota-full');
         let title = '';
         try { title = decodeURIComponent(String(req.headers['x-title'] || '')); } catch (_) { title = ''; }
         const r = library.saveUpload(body, { title: title || 'Untitled', uploadedBy: p.nickname });
@@ -245,7 +254,8 @@ function createApp(overrides = {}, baseConfig = null) {
     // ------------------------------------------------------------- metrics
     router.get('/metrics', (req, res) => {
         const ip = clientIp(req, false);
-        const local = ip === '127.0.0.1' || ip === '::1';
+        // a request relayed by a local reverse proxy is not a local request
+        const local = (ip === '127.0.0.1' || ip === '::1') && !req.headers['x-forwarded-for'] && !req.headers.forwarded;
         if (!cfg.METRICS || (!local && !isAdmin(req))) return sendJson(res, 404, { error: 'not-found' });
         sendText(res, 200, metrics.prometheus(), 'text/plain; version=0.0.4');
     });

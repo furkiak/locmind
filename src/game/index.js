@@ -15,6 +15,12 @@ const HANDLERS = ['core', 'social', 'rooms', 'tools', 'music', 'football', 'rtc'
 const TICK_MS = 50;              // movement broadcast rate for nearby players (20 Hz)
 const FAR_EVERY = 10;            // everybody else gets a full update every 10 ticks (2 Hz)
 const CELL = 700;                // interest management grid cell (px); a client sees its 3x3 cell block at full rate
+// Big crowds: nearby updates slow down to 10 Hz / ~7 Hz. Positions accumulate meanwhile, nothing is lost,
+// and the client interpolates, so it still looks smooth while the traffic drops by half or more.
+const crowdStride = players => (players > 400 ? 3 : players > 150 ? 2 : 1);
+
+/** Facing direction packed into 0..63 (the avatar only shows a small marker). */
+const packDir = (dx, dy) => (Math.round((Math.atan2(dy, dx) + Math.PI) / (2 * Math.PI) * 64) % 64);
 
 const safe = (log, fn) => () => { try { fn(); } catch (err) { log.error('timer failed', err); } };
 
@@ -28,7 +34,8 @@ function createGame(hub, deps) {
     const farDirty = new Set();
     let tick = 0;
     const cellOf = p => `${Math.floor((p.x + 20) / CELL)}:${Math.floor((p.y + 20) / CELL)}`;
-    const row = p => [p.id, round(p.x), round(p.y), round(p.dirX, 2), round(p.dirY, 2)];
+    // compact rows: [short id, x, y, direction] (about a third of the bytes of the long form)
+    const row = p => [p.n, Math.round(p.x), Math.round(p.y), packDir(p.dirX, p.dirY)];
 
     const moveTimer = setInterval(safe(log, () => {
         tick++;
@@ -43,7 +50,7 @@ function createGame(hub, deps) {
             if (rows.length) hub.emit('players:move', rows);
             return;
         }
-        if (!ctx.dirty.size) return;
+        if (!ctx.dirty.size || tick % crowdStride(world.players.size)) return;
         // bucket movers by grid cell
         const movers = new Map();
         for (const id of ctx.dirty) {
