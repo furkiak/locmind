@@ -1,9 +1,10 @@
-# docker compose up -d
+# docker compose up -d                 builds the image from this folder
+# docker compose pull && docker compose up -d --no-build   uses the published image instead
 # The admin token is printed in the logs on first start:  docker compose logs locmind | grep -i token
 services:
   locmind:
     build: .
-    image: locmind:3
+    image: ghcr.io/furkiak/locmind:3
     restart: unless-stopped
 
     # Host networking is the simplest way to run the built-in TURN relay on Linux: no port mapping,

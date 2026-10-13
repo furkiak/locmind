@@ -25,6 +25,31 @@ test('password hashing verifies only the right password', () => {
     assert.ok(!verifyPassword('Secret', rec));
     assert.ok(!verifyPassword(undefined, rec));
     assert.ok(!verifyPassword('secret', null));
+    assert.equal(rec.n, 16384, 'new hashes use the stronger cost and record it');
+});
+
+test('room passwords saved by older versions (cost 2048, no "n") still verify', () => {
+    const crypto = require('crypto');
+    const salt = crypto.randomBytes(16);
+    const legacy = { salt, hash: crypto.scryptSync('secret', salt, 32, { N: 2048 }) };
+    assert.ok(verifyPassword('secret', legacy));
+    assert.ok(!verifyPassword('wrong', legacy));
+    // an unknown cost value from a damaged file never reaches scrypt
+    assert.ok(verifyPassword('secret', { ...legacy, n: 999999999 }));
+});
+
+test('permanent rooms keep their password across a save and reload', () => {
+    const { World } = require('../src/world');
+    const a = new World();
+    const plot = [...a.slotsById.values()].find(s => s.type === 'conference');
+    assert.ok(a.createPermanentRoom({ slotId: plot.id, name: 'Vault', password: 'hunter2' }).ok);
+    const saved = JSON.parse(JSON.stringify(a.permanentRooms()));
+    assert.equal(saved[0].password.n, 16384);
+
+    const b = new World();
+    b.loadPermanentRooms(saved);
+    const room = b.rooms.get(saved[0].slotId);
+    assert.ok(verifyPassword('hunter2', room.password));
 });
 
 test('rate limiter enforces a sliding window', () => {

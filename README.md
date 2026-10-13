@@ -10,6 +10,8 @@
 ![WebRTC](https://img.shields.io/badge/WebRTC-333333?style=for-the-badge&logo=webrtc&logoColor=white)
 ![Self hosted](https://img.shields.io/badge/self--hosted-5E5CE6?style=for-the-badge)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)
+[![Release](https://img.shields.io/github/v/release/furkiak/locmind?style=for-the-badge&color=0A84FF)](https://github.com/furkiak/locmind/releases/latest)
+[![Docker image](https://img.shields.io/badge/docker-ghcr.io%2Ffurkiak%2Flocmind-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://github.com/furkiak/locmind/pkgs/container/locmind)
 
 <img src="docs/hero.jpg" alt="Locmind: a room with tools, the light appearance and the mobile layout" width="900">
 
@@ -101,12 +103,16 @@ Open <http://localhost:3000>, choose a name and an avatar and you are in. The fi
 > `https://` pages or on `localhost`. See [Self-hosting](#-self-hosting) below. Without a microphone
 > you can still join, listen and chat.
 
-**Docker**
+**Docker** — a ready image for `amd64` and `arm64` is published with every release:
 
 ```bash
-docker compose up -d
-docker compose logs locmind | grep -i "admin token"
+docker run -d --name locmind --restart unless-stopped --network host \
+  -v locmind-data:/data -v locmind-media:/media ghcr.io/furkiak/locmind:3
+docker logs locmind | grep -i "admin token"
 ```
+
+Or, from a clone, `docker compose up -d` (see [`docker-compose.yml`](docker-compose.yml) for Docker Desktop on macOS and Windows,
+where host networking is not available and the ports are mapped instead).
 
 ### 🏡 Self-hosting
 
@@ -389,12 +395,16 @@ anahtarı** yazdırılır (ayrıca `data/secrets.json` içine kaydedilir); bunun
 > sayfalarda ya da `localhost` üzerinde izin verir. Aşağıdaki [Kendi sunucunda](#-kendi-sunucunda)
 > bölümüne bak. Mikrofonsuz da katılıp dinleyebilir ve yazışabilirsin.
 
-**Docker**
+**Docker** — her sürümde `amd64` ve `arm64` için hazır imaj yayımlanır:
 
 ```bash
-docker compose up -d
-docker compose logs locmind | grep -i "admin token"
+docker run -d --name locmind --restart unless-stopped --network host \
+  -v locmind-data:/data -v locmind-media:/media ghcr.io/furkiak/locmind:3
+docker logs locmind | grep -i "admin token"
 ```
+
+Ya da depoyu klonlayıp `docker compose up -d` (macOS ve Windows'taki Docker Desktop'ta host ağı olmadığı için portların
+nasıl eşleneceği [`docker-compose.yml`](docker-compose.yml) içinde anlatılıyor).
 
 ### 🏡 Kendi sunucunda
 

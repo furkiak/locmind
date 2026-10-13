@@ -17,6 +17,21 @@ process.on('exit', () => { for (const d of made) { try { fs.rmSync(d, { recursiv
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// Ports that fetch() refuses to connect to (the Fetch standard's "bad ports"). On machines whose dynamic port range starts
+// low (Windows with Docker or Hyper-V uses 1024+), listen(0) can hand one of them out and the HTTP tests then fail.
+const BAD_PORTS = new Set([1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102, 103,
+    104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465, 512, 513, 514, 515, 526, 530,
+    531, 532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060,
+    5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080]);
+
+async function listenOnUsablePort(server) {
+    for (;;) {
+        await new Promise(r => server.listen(0, '127.0.0.1', r));
+        if (!BAD_PORTS.has(server.address().port)) return;
+        await new Promise(r => server.close(r));
+    }
+}
+
 async function bootApp(extra = {}) {
     const fakeFetch = async url => ({ ok: true, json: async () => ({ title: `Title of ${String(url).slice(-11)}` }) });
     const dir = tmpDir();
@@ -27,7 +42,7 @@ async function bootApp(extra = {}) {
         DATA_DIR: path.join(dir, 'data'), MEDIA_DIR: path.join(dir, 'media'), ...extra
     });
     await ctx.ready;
-    await new Promise(r => ctx.server.listen(0, '127.0.0.1', r));
+    await listenOnUsablePort(ctx.server);
     ctx.url = `${ctx.secure ? 'https' : 'http'}://127.0.0.1:${ctx.server.address().port}`;
     ctx.dir = dir;
     return ctx;

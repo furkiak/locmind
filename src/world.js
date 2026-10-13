@@ -390,7 +390,7 @@ class World extends EventEmitter {
     permanentRooms() {
         return Array.from(this.rooms.values()).filter(r => r.permanent).map(r => ({
             slotId: r.id, name: r.name, color: r.color, topic: r.topic,
-            password: r.password ? { salt: r.password.salt.toString('base64'), hash: r.password.hash.toString('base64') } : null,
+            password: r.password ? { salt: r.password.salt.toString('base64'), hash: r.password.hash.toString('base64'), n: r.password.n } : null,
             whiteboard: r.whiteboard, note: r.note
         }));
     }
@@ -398,7 +398,10 @@ class World extends EventEmitter {
     loadPermanentRooms(list) {
         if (!Array.isArray(list)) return;
         for (const r of list) {
-            const rec = r.password && r.password.salt ? { salt: Buffer.from(r.password.salt, 'base64'), hash: Buffer.from(r.password.hash, 'base64') } : null;
+            // Rooms saved before the cost was stored have no "n": verifyPassword treats them as the old cost.
+            const rec = r.password && r.password.salt
+                ? { salt: Buffer.from(r.password.salt, 'base64'), hash: Buffer.from(r.password.hash, 'base64'), n: r.password.n }
+                : null;
             const res = this.createPermanentRoom({ slotId: r.slotId, name: r.name, color: r.color, topic: r.topic, passwordRecord: rec });
             if (!res.ok) continue;
             if (Array.isArray(r.whiteboard)) res.room.whiteboard = r.whiteboard.slice(-MAX_WB_BATCHES);

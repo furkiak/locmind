@@ -23,16 +23,22 @@ function cleanMultiline(value, maxLen) {
 
 function isPlainObject(v) { return v !== null && typeof v === 'object' && !Array.isArray(v); }
 
+// scrypt cost for new room passwords: 16 MB and ~20 ms per check, within Node's default memory limit.
+// The cost is stored with the hash, so rooms saved by older versions (N = 2048) keep their passwords.
+const SCRYPT_N = 16384;
+const LEGACY_SCRYPT_N = 2048;
+
 function hashPassword(password) {
     const salt = crypto.randomBytes(16);
-    const hash = crypto.scryptSync(String(password), salt, 32, { N: 2048 });
-    return { salt, hash };
+    const hash = crypto.scryptSync(String(password), salt, 32, { N: SCRYPT_N });
+    return { salt, hash, n: SCRYPT_N };
 }
 
 function verifyPassword(password, record) {
     if (!record || typeof password !== 'string') return false;
-    const hash = crypto.scryptSync(password, record.salt, 32, { N: 2048 });
-    return crypto.timingSafeEqual(hash, record.hash);
+    const n = record.n === SCRYPT_N || record.n === LEGACY_SCRYPT_N ? record.n : LEGACY_SCRYPT_N;
+    const hash = crypto.scryptSync(password, record.salt, 32, { N: n });
+    return hash.length === record.hash.length && crypto.timingSafeEqual(hash, record.hash);
 }
 
 /** Sliding-window rate limiter keyed by (id, action). */

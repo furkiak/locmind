@@ -52,6 +52,12 @@ a self-hosted community needs is built in, from the WebSocket server to the TURN
   proxied requests, upload quotas hold for streamed bodies, oversized requests get an answer before
   the connection closes.
 - Fuzz tests for every realtime event, HTTP path traversal and uploads. See SECURITY.md.
+- Room passwords are hashed with an eight times higher scrypt cost (N = 16384). The cost is stored with
+  each hash, so permanent rooms saved by earlier builds keep their passwords.
+
+### Releases
+- Every version tag publishes a multi-architecture Docker image (`linux/amd64`, `linux/arm64`) to
+  `ghcr.io/furkiak/locmind`, so a server can start with a single `docker run`.
 
 ### Fixed
 - A focused text field inside a closed window swallowed every keyboard shortcut; Esc now hands the
@@ -60,6 +66,8 @@ a self-hosted community needs is built in, from the WebSocket server to the TURN
   re-plan around people.
 - The football was broadcast 33 times a second to every player in the world.
 - Low frame rates slowed walking down (time step clamp).
+- HTTP tests failed at random on machines whose dynamic port range starts low (Windows with Docker or
+  Hyper-V): the test server could get a port that `fetch` refuses to use. Those ports are now skipped.
 
 ## 2.0.0
 
